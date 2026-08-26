@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+.pnpm-store/
+.yarn/
+
+# build output
+dist/
+build/
+.next/
+.nuxt/
+coverage/
+
+# local env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# editor / os
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# python cache / local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
