@@ -33,8 +33,8 @@ LinguaLoop 是一个开源的对话式语言学习平台，重点不是泛用聊
 
 - 面向项目参与者的文档默认使用中文。
 - 面向代码接口、配置项、CLI 和错误名的标识符使用英文。
-- 新增重要决策时，记录到 `docs/TECH_DECISIONS.md`，包括背景、选择、影响和未解决问题。
-- 新增功能前先确认是否属于 `docs/MVP_SPEC.md` 的第一版范围；不属于时放入路线图或 backlog。
+- 新增重要决策时，记录到 `docs/decisions/TECH_DECISIONS.md`，包括背景、选择、影响和未解决问题。
+- 新增功能前先确认是否属于 `docs/product/MVP_SPEC.md` 的第一版范围；不属于时放入路线图或 backlog。
 
 ## 测试与验证
 

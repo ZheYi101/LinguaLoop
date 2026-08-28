@@ -23,13 +23,13 @@ Patterns
 fixed learning core + optional plugins + capability-aware patterns
 ```
 
-这意味着 LinguaLoop 可以借鉴 DeepSeek Harness 的插件组合思想，但不能让插件任意改写学习闭环本身，也不能把学习 Pattern 简化成普通能力插件。
+这意味着 LinguaLoop 可以借鉴通用 agent 系统的插件组合思想，但不能让插件任意改写学习闭环本身，也不能把学习 Pattern 简化成普通能力插件。系统的产品灵活度主要来自 Pattern，而不是来自一个自由规划的大 agent。
 
 ## 为什么不是 everything is plugin
 
-DeepSeek Harness 这类 agent harness 的目标是让模型、工具、文件访问、session log、agent loop、UI 等能力都可以通过插件替换。这个思路适合通用 agent runtime，因为 agent harness 本身就是运行和组合能力的平台。
+Codex、Claude Code、DeepSeek Harness 这类通用 agent 系统的目标是让模型、工具、文件访问、session log、agent loop、UI 等能力服务于开放任务。这个思路适合通用 agent runtime，因为 agent harness 本身就是运行和组合能力的平台。
 
-LinguaLoop 的目标不同。它首先是语言学习产品，关键价值来自稳定的学习闭环：材料输入、任务化练习、即时反馈、结构化复盘和后续复习。如果这些核心语义都变成任意插件行为，产品会很容易失去一致性、可测试性和学习数据可迁移性。
+LinguaLoop 的目标不同。它首先是语言学习产品，关键价值来自稳定的学习闭环：材料输入、任务化练习、即时反馈、结构化复盘和后续复习。用户和 AI 的交互主要围绕练习语句和材料语境展开，不需要 agent 自由决定下一步要完成什么开放任务。如果这些核心语义都变成任意插件行为，产品会很容易失去一致性、可测试性和学习数据可迁移性。
 
 因此 LinguaLoop 的核心应保持较小但稳定，Plugins 通过明确协议接入，Patterns 通过 core 的学习协议运行，并声明自己需要哪些 plugin capability。
 

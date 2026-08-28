@@ -21,13 +21,15 @@ LinguaLoop 面向已经有一定输入材料的学习者，例如视频字幕、
 ## 文档导航
 
 - [AGENTS.md](./AGENTS.md): 给 Codex / coding agents 的仓库工作规则
-- [docs/PROJECT_BRIEF.md](./docs/PROJECT_BRIEF.md): 项目愿景、用户和产品原则
-- [docs/MVP_SPEC.md](./docs/MVP_SPEC.md): 第一版 MVP 范围和验收标准
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md): 初始系统架构和模块边界
-- [docs/PLUGIN_ARCHITECTURE.md](./docs/PLUGIN_ARCHITECTURE.md): Core / Plugins / Patterns 三层扩展架构
-- [docs/AGENT_CORE_ARCHITECTURE.md](./docs/AGENT_CORE_ARCHITECTURE.md): Python-first Agent Kernel、LangGraph adapter 和 typed LLM 调用规划
-- [docs/TECH_DECISIONS.md](./docs/TECH_DECISIONS.md): 技术决策记录和待定项
-- [docs/ROADMAP.md](./docs/ROADMAP.md): 开发路线图
+- [docs/README.md](./docs/README.md): 文档目录入口和分类导航
+- [docs/product/PROJECT_BRIEF.md](./docs/product/PROJECT_BRIEF.md): 项目愿景、用户和产品原则
+- [docs/product/MVP_SPEC.md](./docs/product/MVP_SPEC.md): 第一版 MVP 范围和验收标准
+- [docs/architecture/ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md): 初始系统架构和模块边界
+- [docs/architecture/CORE_CONCEPTS.md](./docs/architecture/CORE_CONCEPTS.md): Core 领域对象、Provider、EventStore 和 Python/Pydantic 基础概念
+- [docs/architecture/PLUGIN_ARCHITECTURE.md](./docs/architecture/PLUGIN_ARCHITECTURE.md): Core / Plugins / Patterns 三层扩展架构
+- [docs/architecture/AGENT_CORE_ARCHITECTURE.md](./docs/architecture/AGENT_CORE_ARCHITECTURE.md): Python-first Agent Kernel、LangGraph adapter 和 typed LLM 调用规划
+- [docs/decisions/TECH_DECISIONS.md](./docs/decisions/TECH_DECISIONS.md): 技术决策记录和待定项
+- [docs/planning/ROADMAP.md](./docs/planning/ROADMAP.md): 开发路线图
 - [CONTRIBUTING.md](./CONTRIBUTING.md): 开源贡献规范
 
 ## 本地验证

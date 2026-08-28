@@ -76,13 +76,15 @@ LinguaLoop 应采用 `fixed learning core + optional plugins + capability-aware 
 
 Core 负责定义学习语义、状态机、事件日志、Pattern contract、capability contract 和结构化输出。Plugins 负责扩展可选能力，例如语音、Live2D、材料导入、LLM/STT/TTS provider。Patterns 负责组织学习流程，并通过 capability requirements 声明自己依赖哪些插件能力。插件不得绕过 core schema 直接改写用户学习数据。
 
-详细设计见 [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md)。
+详细设计见 [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md)。Core 对象和基础概念见 [CORE_CONCEPTS.md](./CORE_CONCEPTS.md)。
 
 Agent kernel 详细设计见 [AGENT_CORE_ARCHITECTURE.md](./AGENT_CORE_ARCHITECTURE.md)。
 
 ## Agent Kernel 原则
 
-LinguaLoop 的核心 agent 不是一个自由规划的大 agent，而是一个学习流程执行器。它把 Pattern 产出的 `PracticePlan` 编译为可执行、可暂停、可复盘的 agent flow，并把每一步输出落成 `SessionEvent`、`FeedbackItem` 和 `ReviewItem`。
+LinguaLoop 的核心 agent 不是一个自由规划的大 agent，而是一个领域化学习流程执行器。它不负责像 Codex 或 Claude Code 那样自主解决任意任务；它负责执行可声明、可测试、可复盘的语言学习 Pattern。
+
+系统的灵活度主要放在 Pattern 层：Pattern 固定练习模式、语境、纠错强度、输入 modality、结束条件、复习项生成和复习节奏。Kernel 负责执行 Pattern、检查 capability、调用 provider、记录 `SessionEvent`，并把输出沉淀为 `FeedbackItem` 和 `ReviewItem`。
 
 默认 runtime adapter 采用 LangGraph，但 Core 不依赖 LangGraph。LangGraph 负责 stateful workflow、conditional routing、streaming 和 checkpoint / resume；LinguaLoop 自己负责领域模型、Pattern contract、capability registry、权限和事件语义。
 

@@ -18,7 +18,7 @@
 ### 影响
 
 - 短期没有可运行应用。
-- 后续脚手架应以 `docs/MVP_SPEC.md` 和 `docs/ARCHITECTURE.md` 为事实来源。
+- 后续脚手架应以 `docs/product/MVP_SPEC.md` 和 `docs/architecture/ARCHITECTURE.md` 为事实来源。
 - 技术栈选择需要在本文档中补充新的 decision entry。
 
 ## Decision 0002: 采用 Core / Plugins / Patterns 三层扩展架构
@@ -28,7 +28,7 @@
 
 ### 背景
 
-项目希望支持语音、Live2D、不同学习 pattern、复习调度、材料导入、LLM/STT/TTS provider 等能力扩展。DeepSeek Harness 展示了一种高度插件化的 agent harness 设计：通过插件贡献模型、工具、session log、agent loop、UI 等能力。
+项目希望支持语音、Live2D、不同学习 pattern、复习调度、材料导入、LLM/STT/TTS provider 等能力扩展。通用 agent harness 展示了 capability registry、plugin registry、event log 和 runtime adapter 等可借鉴的工程结构。
 
 LinguaLoop 可以借鉴这种插件组合思想，但产品目标不同。LinguaLoop 的核心价值来自稳定学习闭环，而不是任意 agent 能力组合。学习 Pattern 也不应被混同为普通能力插件：Pattern 负责「怎么学」，Plugin 负责「能做什么」。
 
@@ -42,7 +42,7 @@ LinguaLoop 采用 `fixed learning core + optional plugins + capability-aware pat
 
 插件通过明确 contract 扩展能力，不能直接改写 core schema 或绕过学习状态机。Pattern 通过 capability requirements 声明运行条件。
 
-DeepSeek Harness 可以作为参考和实验性 adapter，但不作为 LinguaLoop 的总基座。
+Codex、Claude Code、DeepSeek Harness 等通用 agent 系统可以作为结构参考，但不作为 LinguaLoop 的总基座，也不定义 LinguaLoop 的学习流程。
 
 ### 影响
 
@@ -101,14 +101,19 @@ LinguaLoop core
 
 ### 背景
 
-项目主语言倾向 Python。核心 agent 层需要支持 Pattern 执行、插件能力调用、结构化输出、可恢复会话、事件记录和后续语音扩展。如果不用 DeepSeek Harness，不代表要重写完整 harness；LinguaLoop 需要自有的是学习领域内核和一层薄 agent kernel。
+项目主语言倾向 Python。核心 agent 层需要支持 Pattern 执行、插件能力调用、结构化输出、可恢复会话、事件记录和后续语音扩展。
+
+LinguaLoop 的 agent 定位不是通用任务 agent。它不需要像 Codex 或 Claude Code 那样理解和解决任意开放目标；它需要围绕用户输入材料执行稳定的 language learning loop：输入理解、任务化对话、即时纠错、复述输出和间隔复习。
+
+因此项目可以手写自己的领域化 agent kernel。复杂度应集中在学习语义、Pattern contract、事件记录和 provider 边界，而不是构建一个自由规划的完整 agent harness。
 
 ### 决策
 
 采用 Python-first 核心架构：
 
 - Core 使用 Pydantic models 定义领域对象、事件、Pattern contract 和 capability contract。
-- Agent Kernel 手写 `PatternRunner`、`CapabilityRegistry`、`SessionCoordinator`、`AgentEngine` protocol 和 `EventStore` interface。
+- Agent Kernel 手写 `PatternRunner`、`CapabilityRegistry`、`SessionCoordinator`、`AgentEngine` protocol 和 `EventStore` interface，定位为领域学习流程执行器。
+- 系统灵活度主要放在 Pattern 层；Pattern 决定练习模式、语境、纠错强度、输入 modality、结束条件、复习项生成和复习节奏。
 - 默认 `AgentEngine` adapter 使用 LangGraph，负责 stateful workflow、routing、streaming、checkpoint / resume。
 - typed LLM calls 使用 PydanticAI 或轻量 Pydantic provider adapter，统一包在 LinguaLoop 的 `TypedLLMClient` 后面。
 - LiveKit 继续作为 `voice-livekit` 插件的 SDK，不进入 Core 或 Agent Kernel。
@@ -116,6 +121,7 @@ LinguaLoop core
 ### 影响
 
 - 不采用 DeepSeek Harness 作为主 runtime，但保留实验性 adapter 的可能。
+- 不引入通用自由规划 agent loop；LLM 生成具体语言内容，但不拥有学习流程控制权。
 - 第一阶段先实现 direct deterministic runner，确保手写核心可理解、可测试；LangGraph adapter 在同一 flow 稳定后接入。
 - Core 和 Kernel 不直接暴露 LangGraph checkpoint、PydanticAI agent 或 LiveKit room 概念。
 - 项目默认语言约定从 TypeScript-first 调整为 Python-first core；前端可独立选择 TypeScript / Web 技术栈。
@@ -176,4 +182,3 @@ LinguaLoop core
 - 插件 manifest 格式、权限模型、版本兼容策略。
 - Pattern manifest 格式、capability requirements、fallback 策略。
 - 第一批官方学习 Pattern 清单。
-- Decision 0004 何时从 Proposed 升级为 Accepted。

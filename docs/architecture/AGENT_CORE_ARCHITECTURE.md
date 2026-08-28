@@ -1,27 +1,74 @@
 # Agent Core Architecture
 
-## 核心结论
+## 核心定位
 
-LinguaLoop 不需要自己重写一个 DeepSeek Harness 式的完整 agent harness。项目需要手写的是一个面向语言学习领域的薄内核：
+LinguaLoop 的 agent 不负责自由规划任务；它负责执行可声明、可测试、可复盘的语言学习 Pattern。
+
+项目需要手写的是一个领域化的 `Language Learning Agent Kernel`，而不是 Codex、Claude Code 或 DeepSeek Harness 那种通用 agent harness：
 
 ```text
-LinguaLoop Agent Kernel
-  把 Pattern、Plugin capability、SessionEvent 和 LLM calls 组织成可恢复的学习会话
+Language Learning Agent Kernel
+  把输入材料、练习 Pattern、用户回复、即时反馈、复盘项和复习计划
+  组织成一条可追踪、可暂停、可恢复、可回放的学习闭环
 ```
 
-底层 agent workflow runtime 建议先采用 LangGraph；结构化 LLM 调用建议用 PydanticAI 或一层自写的 Pydantic provider adapter；实时语音继续放在 `voice-livekit` 插件内。
+底层 workflow runtime 可以采用 LangGraph；结构化 LLM 调用可以采用 PydanticAI 或轻量 Pydantic provider adapter；实时语音继续放在 `voice-livekit` 插件内。但这些都是实现层能力，不应该定义 LinguaLoop 的学习语义。
 
-## 关键洞察
+## 为什么可以手写
 
-LinguaLoop 的核心 agent 不是「一个会聊天的大 agent」，而是一个「学习流程执行器」。
+LinguaLoop 的问题域比通用 coding agent 或任务 agent 窄得多。用户和 AI 的主要交互不是“让 agent 自主解决任意问题”，而是在一个明确语境中完成语言练习：理解材料、输出句子、获得纠错、复述、沉淀复习项。
 
-它的主要职责不是让模型自由规划，而是把学习 Pattern 编译成可追踪、可暂停、可复盘的步骤：
+因此核心复杂度不在“agent 能否自主做任何事”，而在这些领域问题：
+
+- 什么是一次学习会话。
+- 什么是一次有效练习。
+- 用户输入如何推进练习状态。
+- 什么错误值得变成 `FeedbackItem`。
+- 什么表达值得变成 `ReviewItem`。
+- Pattern 需要哪些 capability。
+- SessionEvent 如何记录可复盘的学习事实。
+
+这些判断高度 LinguaLoop 化，通用 agent 项目的代码最多只能提供结构参考，不能直接替代项目自己的领域内核。
+
+## 灵活度放在哪里
+
+LinguaLoop 的灵活度应主要通过 Pattern 放开，而不是通过一个自由规划的大 agent 放开。
 
 ```text
 Pattern -> PracticePlan -> AgentFlow -> SessionEvents -> FeedbackItems / ReviewItems
 ```
 
-因此应该把不稳定、容易换的 agent framework 放在 adapter 里，而把学习领域模型、Pattern contract、capability registry 和 event log 留在 LinguaLoop 自己的 Core / Agent Kernel 中。
+每个 Pattern 固定一种练习方式，例如：
+
+- `roleplay`: 固定角色扮演对话流程。
+- `retell`: 固定理解、复述、纠错、再复述流程。
+- `shadowing`: 固定听、跟读、识别差异、重复练习流程。
+- `socratic`: 固定提问式理解检查流程。
+- `spaced-review`: 固定复习调度和回忆练习流程。
+
+Pattern 可以决定本次练习的语境、纠错强度、是否使用语音、什么时候结束、生成什么复习项和多久后复习。Kernel 负责执行 Pattern、检查 capability、调用 provider、写入事件；LLM 负责生成具体语言内容，但不拥有流程控制权。
+
+## 可参考但不照搬
+
+Codex、Claude Code、DeepSeek Harness 这类系统值得参考的是工程结构，而不是 agent loop 本身。
+
+可以参考：
+
+- event log / checkpoint 的思想。
+- capability registry / plugin registry 的边界。
+- context 压缩、摘要和恢复策略。
+- provider adapter 的抽象方式。
+- 工具或 provider 调用失败时的 fallback。
+- 如何把运行过程变成可调试轨迹。
+
+不应照搬：
+
+- 面向任意任务的自由规划 loop。
+- 让模型决定产品流程下一步做什么。
+- 把学习 Pattern 降级成普通 tool 或 skill。
+- 让外部 harness 的 session / tool / UI 概念进入 LinguaLoop 的 core schema。
+
+核心原则是：通用 agent 解决开放任务；LinguaLoop agent 执行领域学习闭环。
 
 ## 推荐技术方向
 

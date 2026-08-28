@@ -13,7 +13,7 @@
 
 ## 开发流程
 
-1. 先阅读 `README.md`、`AGENTS.md` 和 `docs/MVP_SPEC.md`。
+1. 先阅读 `README.md`、`AGENTS.md` 和 `docs/product/MVP_SPEC.md`。
 2. 确认变更是否属于 MVP 范围；如果不是，先更新路线图或提出设计讨论。
 3. 保持 Pull Request 聚焦，避免把产品决策、重构和功能实现混在一起。
 4. 新增代码时提供必要测试和最小可运行说明。
@@ -29,4 +29,3 @@
 ## License
 
 开源许可证尚未确定。在确定前，请不要假设本项目已采用 MIT、Apache-2.0 或其他许可证。
-
