@@ -1,7 +1,9 @@
-from typing import TypedDict
-from langgraph.graph import StateGraph, START, END
-from typing_extensions import Required, NotRequired
+from typing import NotRequired, Required, TypedDict
+
+from langgraph.graph import END, START, StateGraph
+
 from lingualoop.core.domain import FeedbackItem, ReviewItem
+from lingualoop.core.ports import LearningLLMProvider
 
 
 class LearningState(TypedDict, total=False):
@@ -15,7 +17,7 @@ class LearningState(TypedDict, total=False):
     review_items: NotRequired[list[ReviewItem]]
 
 
-def build_learning_session_graph(llm_provider):
+def build_learning_session_graph(llm_provider: LearningLLMProvider):
     async def create_task(state: LearningState) -> dict:
         task = await llm_provider.generate_task(
             material_text=state["material_text"],

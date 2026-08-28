@@ -8,7 +8,7 @@
 - [ ] 确定 MVP 的首个目标语言和示例材料
 - [ ] 定义插件 manifest、capability registry 和权限模型 v0
 - [ ] 定义 Pattern manifest、capability requirements 和第一批学习 Pattern 清单
-- [ ] 确认 Python-first Agent Kernel 方案并将 Decision 0004 升级为 Accepted
+- [x] 确认 Python-first Agent Kernel 方案并将 Decision 0004 升级为 Accepted
 
 ## Phase 1: 可运行 MVP
 

@@ -4,7 +4,7 @@ LinguaLoop 是一个开源的对话式语言学习平台。项目目标是把「
 
 ## 当前状态
 
-项目处于初始化阶段。本仓库目前只放置基础文档，用于沉淀产品边界、MVP 范围、架构方向和协作规范。正式应用脚手架尚未创建。
+项目处于初始化阶段。本仓库目前包含基础文档和 Python core 的早期脚手架，用于沉淀产品边界、MVP 范围、架构方向和协作规范。正式应用尚未创建。
 
 ## 产品方向
 
@@ -29,6 +29,14 @@ LinguaLoop 面向已经有一定输入材料的学习者，例如视频字幕、
 - [docs/TECH_DECISIONS.md](./docs/TECH_DECISIONS.md): 技术决策记录和待定项
 - [docs/ROADMAP.md](./docs/ROADMAP.md): 开发路线图
 - [CONTRIBUTING.md](./CONTRIBUTING.md): 开源贡献规范
+
+## 本地验证
+
+安装开发依赖后，可以运行当前 core 测试：
+
+```bash
+python -m pytest
+```
 
 ## 下一步
 

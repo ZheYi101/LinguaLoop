@@ -96,8 +96,8 @@ LinguaLoop core
 
 ## Decision 0004: Python-first Agent Kernel with LangGraph Adapter
 
-- Status: Proposed
-- Date: 2026-08-25
+- Status: Accepted
+- Date: 2026-08-27
 
 ### 背景
 
@@ -119,6 +119,7 @@ LinguaLoop core
 - 第一阶段先实现 direct deterministic runner，确保手写核心可理解、可测试；LangGraph adapter 在同一 flow 稳定后接入。
 - Core 和 Kernel 不直接暴露 LangGraph checkpoint、PydanticAI agent 或 LiveKit room 概念。
 - 项目默认语言约定从 TypeScript-first 调整为 Python-first core；前端可独立选择 TypeScript / Web 技术栈。
+- 初始 Python package scaffold 已创建，LangGraph 先作为 `engine.langgraph` adapter 引入，core 只保留领域模型和 provider contract。
 
 ### 参考
 

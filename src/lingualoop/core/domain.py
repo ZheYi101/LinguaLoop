@@ -1,9 +1,10 @@
 from enum import StrEnum
+
 from pydantic import BaseModel, Field
 
 
 class MessageRole(StrEnum):
-    User = "user"
+    USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
 
@@ -12,7 +13,7 @@ class LearningMaterial(BaseModel):
     id: str
     title: str
     target_language: str
-    naive_language: str
+    native_language: str
     content: str
 
 
@@ -39,5 +40,5 @@ class PracticeSession(BaseModel):
     material_id: str
     learner_level: str
     messages: list[Message] = Field(default_factory=list)
-    feedback_item: list[FeedbackItem] = Field(default_factory=list)
-    review_item: list[ReviewItem] = Field(default_factory=list)
+    feedback_items: list[FeedbackItem] = Field(default_factory=list)
+    review_items: list[ReviewItem] = Field(default_factory=list)
