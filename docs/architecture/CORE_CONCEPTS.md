@@ -8,6 +8,29 @@ Core 负责定义 LinguaLoop 的稳定学习语义。这里应该放项目长期
 
 Core 不应该直接绑定 LangGraph、LiveKit、OpenAI SDK、数据库 ORM 或前端框架。那些工具属于 adapter、plugin 或 app 层。这样做的目标是：以后替换 workflow runtime、LLM provider 或存储层时，不需要重写学习数据模型。
 
+## Core、Kernel 和 Adapter 的区别
+
+可以把三层理解为名词、动词和运行方式：
+
+```text
+core
+  定义 LinguaLoop 世界里的稳定名词和协议：材料、片段、会话、消息、反馈、复习项、事件、Pattern、Capability、Provider contract。
+
+kernel
+  定义这些对象如何协作完成一次学习动作：开始会话、选择 Pattern、检查 capability、调用 provider、处理用户消息、写入事件、生成复习项。
+
+adapter / plugin
+  定义外部工具如何接入：LangGraph 怎么跑流程、OpenAI-compatible provider 怎么生成内容、SQLite 怎么存事件、LiveKit 怎么处理语音。
+```
+
+所以 `kernel` 不是 `core` 的普通实现类。它依赖 core 的对象和协议，但表达的是 LinguaLoop 的流程规则。一个简单判断规则是：
+
+- 换掉 LangGraph、OpenAI、SQLite 后仍然成立的业务对象，放 `core`。
+- 描述“收到用户回答后下一步应该做什么”的流程，放 `kernel`。
+- 描述“某个框架或 SDK 具体怎么接入”的代码，放 `engine`、`providers` 或 `plugins`。
+
+这也是为什么 `domain.py` 在后端项目里不只是前端常见的 `types/` 文件。它不仅提供类型提示，还定义产品承认的学习事实和校验规则。
+
 ## Agent 的定位
 
 LinguaLoop 的 agent 不负责自由规划任务；它负责执行可声明、可测试、可复盘的语言学习 Pattern。

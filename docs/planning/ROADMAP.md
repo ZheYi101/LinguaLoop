@@ -9,19 +9,22 @@
 - [ ] 定义插件 manifest、capability registry 和权限模型 v0
 - [ ] 定义 Pattern manifest、capability requirements 和第一批学习 Pattern 清单
 - [x] 确认 Python-first Agent Kernel 方案并将 Decision 0004 升级为 Accepted
+- [x] 沉淀真实输入学习闭环的理论依据和 EnglishLearningWorkflow 实践经验
 
 ## Phase 1: 可运行 MVP
 
 - [ ] 创建应用脚手架
 - [ ] 实现 Python core Pydantic models 和 session event schema
+- [ ] 实现 material lifecycle：raw source、lesson-ready text、segment metadata
 - [ ] 实现 Agent Kernel 的 direct deterministic runner
 - [ ] 实现材料创建和管理
 - [ ] 实现材料分析 pipeline
 - [ ] 实现基于材料的文本对话
 - [ ] 实现会话复盘和 review items
+- [ ] 实现 review outcome 和用户控制事件：again、hard、good、easy、pause、ignore、delete、archive、mastered
 - [ ] 实现最小 plugin registry
 - [ ] 实现 capability requirement check
-- [ ] 实现内置文本学习 Pattern
+- [ ] 实现内置 input-derived 文本学习 Pattern
 - [ ] 实现 LangGraph AgentEngine adapter
 - [ ] 增加 LLM provider mock 和基础测试
 
@@ -32,6 +35,7 @@
 - [ ] 增加 roleplay / shadowing / retell 学习 Pattern
 - [ ] 增加复习列表和基础提醒
 - [ ] 增加 spaced-review 调度 Pattern
+- [ ] 增加 CORA spoken-retrieval Pattern：Cold attempt、Observe、Rebuild、Automate
 - [ ] 增加会话历史搜索
 - [ ] 增加学习进度概览
 

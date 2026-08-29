@@ -45,8 +45,31 @@ Pattern -> PracticePlan -> AgentFlow -> SessionEvents -> FeedbackItems / ReviewI
 - `shadowing`: 固定听、跟读、识别差异、重复练习流程。
 - `socratic`: 固定提问式理解检查流程。
 - `spaced-review`: 固定复习调度和回忆练习流程。
+- `input-lesson`: 固定 Scene/Argument Capsule、目标选择、理解检查、易错改写、语境输出和 Profile Delta。
+- `cora`: 固定 Cold attempt、Observe、Rebuild、Automate，用于训练已经理解但不能快速取出的口语表达。
 
 Pattern 可以决定本次练习的语境、纠错强度、是否使用语音、什么时候结束、生成什么复习项和多久后复习。Kernel 负责执行 Pattern、检查 capability、调用 provider、写入事件；LLM 负责生成具体语言内容，但不拥有流程控制权。
+
+## 实践校准后的学习闭环
+
+从 `input-driven-language-coach` 和 EnglishLearningWorkflow 的使用记录看，LinguaLoop 的 agent kernel 需要保护三条学习事实：
+
+1. 输入必须先被整理成可教学材料。raw subtitle、raw transcript 和 cleaned lesson-ready text 在数据模型中不能混为一谈。
+2. 用户输出才是学习证据。系统展示过解释、model answer 或 review item，不代表学习者已经掌握。
+3. 不同学习现象需要不同 Pattern。输入材料学习、对话 roleplay、复述、summary-first review 和 CORA spoken retrieval 可以共享领域对象，但不应强制共享同一个流程模板。
+
+因此 Agent Kernel 的职责不是“多调用几次 LLM”，而是把以下过程变成可追踪事件：
+
+```text
+select pattern
+  -> build practice plan
+  -> require learner output
+  -> collect feedback evidence
+  -> emit review candidates
+  -> schedule or summarize future retrieval
+```
+
+相关依据见 [Learning Loop Foundation](../research/LEARNING_LOOP_FOUNDATION.md) 和 [Practice Workspace Findings](../research/PRACTICE_WORKSPACE_FINDINGS.md)。
 
 ## 可参考但不照搬
 

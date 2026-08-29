@@ -58,12 +58,15 @@ packages/plugins
   voice-livekit
   avatar-live2d
   importer-subtitles
+  material-normalizer
   llm-openai-compatible
   stt-provider adapters
   tts-provider adapters
 
 packages/patterns
+  input-lesson
   roleplay
+  cora
   shadowing
   retell
   socratic
@@ -94,6 +97,7 @@ Core 不导入具体 Plugins 或 Patterns。Patterns 可以依赖 Core contract�
 
 - UserProfile: 用户语言、目标、偏好设置。
 - LearningMaterial: 学习材料、来源、正文、分析结果。
+- LearningSegment: 可教学片段、track、起止引用、场景/论点摘要和前后文摘要。
 - PracticeSession: 练习会话、目标、难度、状态和消息。
 - Message: 对话消息、角色、时间、反馈引用。
 - FeedbackItem: 错误类型、原句、建议句、解释、复习状态。
@@ -131,6 +135,9 @@ Plugins 是可用可不用的能力提供者。它们不决定学习流程，只
 - `voice.session`: 实时语音会话。
 - `avatar.render`: avatar / Live2D 渲染。
 - `material.import`: 外部材料导入。
+- `material.normalize`: 将 raw subtitle / transcript 清洗为 lesson-ready text。
+- `material.segment`: 按 track 生成可教学片段和前后文摘要。
+- `review.schedule`: 计算或更新 review item 的下次复习时间与结果。
 - `telemetry.record`: 指标记录。
 
 一个插件可以注册多个 capability，例如 `voice-livekit` 可以同时提供 `voice.session`、`stt.transcribe`、`tts.speak` 的编排能力和语音指标。
@@ -143,10 +150,12 @@ Pattern 可以是内置的，也可以作为第三方 package 分发；但概念
 
 例如：
 
+- `input-lesson`: 依赖 `llm.generate` / `llm.structured`，可选依赖 `material.normalize` 和 `material.segment`。
 - `roleplay`: 可只依赖 `llm.generate`，也可以可选依赖 `voice.session`。
+- `cora`: 可只依赖文本输入和 `llm.generate`，语音版可选依赖 `stt.transcribe`。
 - `shadowing`: 通常依赖 `tts.speak`、`stt.transcribe`，可选依赖 `avatar.render`。
 - `retell`: 主要依赖 `llm.generate`，可选依赖 `stt.transcribe`。
-- `spaced-review`: 可以不依赖多模态插件，只依赖 core review data。
+- `spaced-review`: 可以不依赖多模态插件，只依赖 core review data；更完整版本可选依赖 `review.schedule`。
 
 ## 扩展点
 

@@ -22,6 +22,19 @@
 - 基础设置：目标语言、用户母语、难度、纠错强度。
 - 最小扩展基础：内置文本学习 Pattern、LLM provider plugin contract、capability requirement check、provider mock。
 
+## 学习方法约束
+
+MVP 不需要一次性实现完整课程系统或 SRS，但必须体现以下学习闭环约束：
+
+- 输入材料需要进入可教学状态。至少要区分 raw text、lesson-ready text 和后续 segment；不要直接从带时间戳、断行、重复 cue 或明显 ASR 噪音的字幕中抽取练习目标。
+- `track` 是显式业务属性，不应只由文件后缀推断。`live_chat` 更关注互动语气和口语 chunk；`article_reading` 更关注论点、连接词、概括和改写精度。
+- 每次练习必须包含一个主动输出动作，例如改写、复述、场景对话或短 summary；只展示解释不算完成学习闭环。
+- 反馈必须关联到用户真实输出或源材料片段，优先记录反复出现的 pattern-level 问题，而不是堆叠所有小错。
+- 复盘必须生成结构化 review candidates，即使第一版只实现简单 `due_at` 和 `status`，也要为后续 spaced review 留接口。
+- Profile Delta 只能表示本轮学习证据，不能把一次回答包装成长期能力结论。
+
+理论和实践依据见 [Learning Loop Foundation](../research/LEARNING_LOOP_FOUNDATION.md) 与 [Practice Workspace Findings](../research/PRACTICE_WORKSPACE_FINDINGS.md)。
+
 ## 暂不包含
 
 - 生产级语音识别和语音合成；语音能力作为后续 `voice-livekit` 插件验证。
@@ -57,3 +70,5 @@
 - LLM 调用失败时有可理解的错误提示，不丢失用户当前输入。
 - 用户数据和配置不依赖硬编码示例。
 - 内置学习 Pattern 通过稳定 contract 生成练习计划和复盘草稿，并声明所需 capability。
+- 系统不会把“生成过 lesson”或“展示过复习项”计为掌握；只有用户输出、复习结果或延迟检索结果能更新学习状态。
+- Review 入口默认 summary-first，先给 1-3 个复习方向，再按需展开具体条目。

@@ -134,6 +134,60 @@ LinguaLoop 的 agent 定位不是通用任务 agent。它不需要像 Codex 或 
 - PydanticAI agents: https://pydantic.dev/docs/ai/core-concepts/agent/
 - PydanticAI output validation: https://pydantic.dev/docs/ai/core-concepts/output/
 
+## Decision 0005: 以真实输入和输出证据定义学习闭环
+
+- Status: Accepted
+- Date: 2026-08-28
+
+### 背景
+
+LinguaLoop 的思考起源来自一个已实际使用的 `input-driven-language-coach` skill 和 EnglishLearningWorkflow 经验工作区。该工作区包含 raw/cleaned/segments/lessons/sessions 的材料流、输入驱动 lesson、summary-first review，以及独立的 CORA spoken-retrieval practice。
+
+这些实践显示，产品价值不在“一次性生成解释”，而在把真实输入材料转化为可输出、可纠错、可复习、可延迟检索的学习证据链。外部学习科学也支持类似方向：noticing、output、retrieval practice、distributed practice 和 formulaic language 都提示系统应促成注意、输出、回忆、间隔和语块完整性，而不是只提供被动讲解。
+
+### 决策
+
+LinguaLoop 的 MVP 和后续架构采用以下学习闭环作为产品约束：
+
+```text
+真实输入 -> 语境理解 -> 高价值目标选择 -> 检索/输出 -> 纠错 -> 复习项 -> 延迟再输出
+```
+
+具体约束：
+
+- 用户材料必须保留 raw、normalized/lesson-ready、segment 的概念边界。
+- `track` 是显式业务属性；`live_chat`、`article_reading`、后续 `spoken_retrieval` 等 track 可共享对象，但不能被文件后缀替代。
+- 用户真实输出、冷启动尝试、复习结果和延迟检索结果才是学习状态更新证据。
+- `FeedbackItem` 应优先表达 pattern-level 问题，并能关联到用户消息或材料片段。
+- `ReviewItem` 应是可重新检索或迁移使用的任务，不只是词条收藏。
+- Profile Delta 是当前证据快照，长期 profile 应从事件、反馈和复习结果重建。
+- CORA spoken-retrieval 与 input-driven lesson 是不同 Pattern 家族，不能强行合并成一个六段 lesson 模板。
+
+### 影响
+
+- Product spec 需要把主动输出、反馈证据、review candidates 和 summary-first review 作为 MVP 验收约束。
+- Architecture 需要明确 material lifecycle、session events、learner profile snapshot 和 review queue 的边界。
+- Pattern contract 需要允许不同学习方法拥有不同状态机，同时共享 `PracticePlan`、`SessionEvent`、`FeedbackItem` 和 `ReviewItem` 等 core 对象。
+- Provider adapter 不能只提供 free-form chat completion；它需要支持结构化材料分析、纠错、复习项生成和 profile delta 生成。
+- 不应把生成 lesson、展示 model answer 或展示复习项计为掌握；只有后续输出证据能更新学习状态。
+
+### 未解决问题
+
+- MVP 是否纳入 `spoken_retrieval` / CORA 作为正式 Pattern，还是先作为 roadmap 中的后续 Pattern。
+- `LearningSegment`、`ProfileDelta`、`ReviewOutcome` 和用户控制事件的最终 schema。
+- Review 调度第一版使用简单 due date，还是引入更完整的 SRS 参数。
+- 如何在公开 demo 中展示经验样本价值，同时不暴露个人学习材料和历史。
+
+### 参考
+
+- Learning Loop Foundation: ../research/LEARNING_LOOP_FOUNDATION.md
+- Practice Workspace Findings: ../research/PRACTICE_WORKSPACE_FINDINGS.md
+- Schmidt 1990, noticing hypothesis: https://doi.org/10.1093/applin/11.2.129
+- Swain 1998, output hypothesis: https://doi.org/10.1016/S0346-251X(98)00002-5
+- Karpicke & Blunt 2011, retrieval practice: https://doi.org/10.1126/science.1199327
+- Cepeda et al. 2006, distributed practice: https://doi.org/10.1037/0033-2909.132.3.354
+- Wood 2006, formulaic language in L2 speech: https://eric.ed.gov/?id=EJ750535
+
 ## 技术栈候选
 
 ### Python-first Agent Core

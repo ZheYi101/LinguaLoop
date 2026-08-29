@@ -76,7 +76,7 @@ LinguaLoop 应采用 `fixed learning core + optional plugins + capability-aware 
 
 Core 负责定义学习语义、状态机、事件日志、Pattern contract、capability contract 和结构化输出。Plugins 负责扩展可选能力，例如语音、Live2D、材料导入、LLM/STT/TTS provider。Patterns 负责组织学习流程，并通过 capability requirements 声明自己依赖哪些插件能力。插件不得绕过 core schema 直接改写用户学习数据。
 
-详细设计见 [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md)。Core 对象和基础概念见 [CORE_CONCEPTS.md](./CORE_CONCEPTS.md)。
+详细设计见 [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md)。Pattern 分类见 [LEARNING_PATTERNS.md](./LEARNING_PATTERNS.md)。Core 对象和基础概念见 [CORE_CONCEPTS.md](./CORE_CONCEPTS.md)。
 
 Agent kernel 详细设计见 [AGENT_CORE_ARCHITECTURE.md](./AGENT_CORE_ARCHITECTURE.md)。
 
@@ -87,6 +87,40 @@ LinguaLoop 的核心 agent 不是一个自由规划的大 agent，而是一个�
 系统的灵活度主要放在 Pattern 层：Pattern 固定练习模式、语境、纠错强度、输入 modality、结束条件、复习项生成和复习节奏。Kernel 负责执行 Pattern、检查 capability、调用 provider、记录 `SessionEvent`，并把输出沉淀为 `FeedbackItem` 和 `ReviewItem`。
 
 默认 runtime adapter 采用 LangGraph，但 Core 不依赖 LangGraph。LangGraph 负责 stateful workflow、conditional routing、streaming 和 checkpoint / resume；LinguaLoop 自己负责领域模型、Pattern contract、capability registry、权限和事件语义。
+
+## 学习材料生命周期
+
+经验工作区显示，输入材料在进入练习前需要经历清晰生命周期，而不是从用户粘贴文本直接跳到对话：
+
+```text
+RawSource
+  -> NormalizedMaterial
+  -> LearningSegment
+  -> PracticePlan
+  -> PracticeSession
+  -> FeedbackItem / ReviewItem
+```
+
+- `RawSource` 保存用户导入或粘贴的原始材料。
+- `NormalizedMaterial` 表示去除字幕编号、时间戳、重复 cue、断行和明显噪音后的 lesson-ready text。
+- `LearningSegment` 是可教学片段，带有 `track`、`start_ref`、`end_ref`、`scene_or_argument_summary`、前后文摘要等元数据。
+- `PracticePlan` 由 Pattern 生成，决定本轮怎么练。
+- `PracticeSession` 聚合当前会话状态，但长期事实应由 `SessionEvent` 保存。
+
+这个生命周期支持后续材料导入插件、不同 track 的切分策略，以及 review 时不必重新读取完整原材料也能恢复语境。
+
+## 学习证据与状态
+
+LinguaLoop 不应把“内容展示过”当成“学习者掌握了”。学习状态只能由真实表现证据推进：用户回答、冷启动输出、纠错结果、复习结果、延迟检索结果和用户控制动作。
+
+因此持久化层应区分：
+
+- `SessionEvent`: 发生过的事实，是可回放学习历史。
+- `FeedbackItem`: 从用户输出中产生的纠错证据。
+- `ReviewItem`: 未来要重新检索或迁移使用的任务。
+- `LearnerProfile`: 从历史证据汇总出的当前快照，不是唯一事实来源。
+
+详细方法依据见 [Learning Loop Foundation](../research/LEARNING_LOOP_FOUNDATION.md) 和 [Practice Workspace Findings](../research/PRACTICE_WORKSPACE_FINDINGS.md)。
 
 ## LLM 编排原则
 
@@ -108,6 +142,8 @@ LiveKit 是 `voice-livekit` 插件的强候选 SDK，而不是项目总基座。
 - startPracticeSession(material, goal, preferences): 创建练习会话。
 - continueConversation(session, userMessage): 生成下一轮 AI 回复和可选反馈。
 - summarizeSession(session): 生成复盘和 review items。
+- startReview(language, profile, reviewQueue): summary-first 地选择 1-3 个复习方向，而不是直接倾倒所有过期条目。
+- recordLearningEvidence(session, event): 把用户输出、反馈、复习结果和用户控制动作保存为可回放事件。
 
 ## 数据与隐私
 

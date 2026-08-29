@@ -13,4 +13,6 @@ src/lingualoop/engine/__init__.py
 src/lingualoop/engine/langgraph/__init__.py
 src/lingualoop/engine/langgraph/learning_session.py
 src/lingualoop/kernel/__init__.py
+src/lingualoop/kernel/event_store.py
+src/lingualoop/kernel/session_runner.py
 tests/test.py
