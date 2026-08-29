@@ -22,6 +22,8 @@ class DomainModel(BaseModel):
 
 # Language ability level(A1 is lowest)
 class ProficiencyLevel(StrEnum):
+    """user's ability of target language"""
+
     A1 = "A1"
     A2 = "A2"
     B1 = "B1"
@@ -82,6 +84,17 @@ class SessionEventType(StrEnum):
     SESSION_COMPLETED = "session.completed"
 
 
+class LanguageEnum(StrEnum):
+    """contain all supported language(in fact just randomly listed)"""
+
+    CHINESE = "chinese"
+    ENGLISH = "english"
+    JAPANESE = "japanese"
+    FRENCH = "french"
+    GERMANY = "germany"
+    SPANISH = "spanish"
+
+
 class CapabilityRequirement(DomainModel):
     name: str
     min_version: str = "1.0"
@@ -90,8 +103,8 @@ class CapabilityRequirement(DomainModel):
 
 class UserProfile(DomainModel):
     id: str = Field(default_factory=lambda: new_id("user"))
-    native_language: str
-    target_language: str
+    native_language: LanguageEnum
+    target_language: LanguageEnum
     learner_level: ProficiencyLevel = ProficiencyLevel.UNKNOWN
     correction_intensity: CorrectionIntensity = CorrectionIntensity.MEDIUM
     goals: list[str] = Field(default_factory=list)
@@ -122,8 +135,8 @@ class MaterialAnalysis(DomainModel):
 class LearningMaterial(DomainModel):
     id: str = Field(default_factory=lambda: new_id("mat"))
     title: str
-    target_language: str
-    native_language: str
+    target_language: LanguageEnum
+    native_language: LanguageEnum
     content: str
     source_type: MaterialSourceType = MaterialSourceType.TEXT
     analysis: MaterialAnalysis | None = None
@@ -139,6 +152,9 @@ class LearningMaterial(DomainModel):
 
 
 class PracticeInstruction(DomainModel):
+    """a concrete practice instruction produced by ai,
+    which equals to a small task to practice, inside a `PracticeSession`"""
+
     id: str = Field(default_factory=lambda: new_id("instruction"))
     prompt: str
     expected_output: str | None = None
@@ -151,10 +167,11 @@ class PracticePlan(DomainModel):
     pattern_id: str
     title: str
     instructions: list[PracticeInstruction] = Field(default_factory=list)
-    required_capabilities: list[CapabilityRequirement] = Field(default_factory=list)
 
 
 class Message(DomainModel):
+    """refer to all sentences shown in the chat block, no matter by human or ai"""
+
     id: str = Field(default_factory=lambda: new_id("msg"))
     role: MessageRole
     content: str
@@ -196,7 +213,7 @@ class PracticeSession(DomainModel):
     id: str = Field(default_factory=lambda: new_id("session"))
     material_id: str
     pattern_id: str
-    learner_level: ProficiencyLevel | str
+    learner_level: ProficiencyLevel
     status: SessionStatus = SessionStatus.ACTIVE
     plan: PracticePlan | None = None
     messages: list[Message] = Field(default_factory=list)
@@ -209,7 +226,7 @@ class PracticeSession(DomainModel):
     def current_instruction(self) -> PracticeInstruction | None:
         if self.plan is None or not self.plan.instructions:
             return None
-        return self.plan.instructions[-1]
+        return self.plan.instructions[-1]  # return the latest instruction
 
 
 class SessionEvent(DomainModel):
@@ -224,12 +241,11 @@ class PatternManifest(DomainModel):
     id: str
     name: str
     description: str
-    required_capabilities: list[CapabilityRequirement] = Field(default_factory=list)
-    optional_capabilities: list[CapabilityRequirement] = Field(default_factory=list)
+    required_capabilities: list[str] = Field(default_factory=list)
 
 
 class PluginManifest(DomainModel):
     id: str
     name: str
     version: str
-    provided_capabilities: list[CapabilityRequirement] = Field(default_factory=list)
+    provided_capabilities: list[str] = Field(default_factory=list)

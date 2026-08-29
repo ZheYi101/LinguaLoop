@@ -1,37 +1,50 @@
 from typing import Protocol
 
-from lingualoop.core.domain import FeedbackItem, Message, ReviewItem, SessionEvent
+from lingualoop.core.domain import (
+    FeedbackItem,
+    LanguageEnum,
+    LearningMaterial,
+    Message,
+    PracticeInstruction,
+    ProficiencyLevel,
+    ReviewItem,
+    SessionEvent,
+)
 
 
 class LearningLLMProvider(Protocol):
     async def generate_task(
-        self, *, material_text: str, learner_level: str, target_language: str
+        self,
+        *,
+        material: LearningMaterial,
+        learner_level: ProficiencyLevel,
+        target_language: LanguageEnum,
     ) -> str: ...
 
     async def generate_reply(
         self,
         *,
-        task: str,
-        material_text: str,
+        current_instruction: PracticeInstruction,
+        material: LearningMaterial,
         message_history: list[Message],
-        user_message: str,
+        user_message: Message,
         corrections: list[FeedbackItem],
-        target_language: str,
+        target_language: LanguageEnum,
     ) -> str: ...
 
     async def correct_answer(
         self,
         *,
-        task: str,
-        user_message: str,
-        target_language: str,
+        current_instruction: PracticeInstruction,
+        user_message: Message,
+        target_language: LanguageEnum,
     ) -> list[FeedbackItem]: ...
 
     async def create_review_items(
         self,
         *,
         corrections: list[FeedbackItem],
-        material_text: str,
+        material: LearningMaterial,
     ) -> list[ReviewItem]: ...
 
 
