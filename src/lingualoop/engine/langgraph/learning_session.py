@@ -27,30 +27,34 @@ class LearningState(TypedDict, total=False):
 
 def build_learning_session_graph(llm_provider: LearningLLMProvider):
     async def create_task(state: LearningState) -> dict:
-        task = await llm_provider.generate_task(
+        task_prompt = await llm_provider.generate_task(
             material=state["material"],
             learner_level=state["learner_level"],
             target_language=state["target_language"],
         )
-        return {"task": task}
+        return {"current_instruction": PracticeInstruction(prompt=task_prompt)}
 
     async def correct_answer(state: LearningState) -> dict:
-        task = state.get("current_instruction")
-        if task is None:
-            raise ValueError("Learning.task is required before using correct_answer")
+        current_instruction = state.get("current_instruction")
+        if current_instruction is None:
+            raise ValueError(
+                "Learning.current_instruction is required before using correct_answer"
+            )
         corrections = await llm_provider.correct_answer(
-            current_instruction=task,
+            current_instruction=current_instruction,
             user_message=state["user_message"],
             target_language=state["target_language"],
         )
         return {"corrections": corrections}
 
     async def generate_reply(state: LearningState) -> dict:
-        task = state.get("current_instruction")
-        if task is None:
-            raise ValueError("Learning.task is required before using generate_reply")
+        current_instruction = state.get("current_instruction")
+        if current_instruction is None:
+            raise ValueError(
+                "Learning.current_instruction is required before using generate_reply"
+            )
         assistant_message = await llm_provider.generate_reply(
-            current_instruction=task,
+            current_instruction=current_instruction,
             material=state["material"],
             message_history=[],
             user_message=state["user_message"],

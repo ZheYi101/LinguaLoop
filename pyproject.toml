@@ -20,7 +20,9 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 
 [dependency-groups]
-dev = []
+dev = [
+    "pytest>=8",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

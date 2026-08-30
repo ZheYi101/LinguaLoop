@@ -1,13 +1,8 @@
 from __future__ import annotations
-import asyncio
-from dis import Instruction
-from email import message
 
 from pydantic import BaseModel, Field
-from requests import session
 
 from lingualoop.core.domain import (
-    CapabilityRequirement,
     FeedbackItem,
     LearningMaterial,
     Message,
@@ -35,7 +30,7 @@ class SessionStepResult(BaseModel):
 
 
 class DirectLearningSessionRunner:
-    """Deterministic business runner before Langgraph owns orchestration"""
+    """Deterministic business runner before LangGraph owns orchestration."""
 
     def __init__(
         self, llm_provider: LearningLLMProvider, event_store: EventStore
@@ -43,7 +38,6 @@ class DirectLearningSessionRunner:
         self._llm_provider = llm_provider
         self._event_store = event_store
 
-    # todo: 完成这里; 还没写完这个文件
     async def start_session(
         self,
         *,
@@ -51,14 +45,14 @@ class DirectLearningSessionRunner:
         profile_level: ProficiencyLevel,
         pattern_id: str = DEFAULT_PATTERN_ID,
     ) -> SessionStepResult:
-        task = self._llm_provider.generate_task(
+        task_prompt = await self._llm_provider.generate_task(
             material=material,
             learner_level=profile_level,
             target_language=material.target_language,
         )
 
         instruction = PracticeInstruction(
-            prompt=task,
+            prompt=task_prompt,
             focus_points=_focus_points_from_material(material),
         )
 
@@ -68,7 +62,7 @@ class DirectLearningSessionRunner:
             instructions=[instruction],
         )
 
-        assistant_message = Message(role=MessageRole.ASSISTANT, content=task)
+        assistant_message = Message(role=MessageRole.ASSISTANT, content=task_prompt)
 
         session = PracticeSession(
             material_id=material.id,
@@ -96,7 +90,7 @@ class DirectLearningSessionRunner:
             session=session, events=events, assistant_message=assistant_message
         )
 
-    async def handler_user_message(
+    async def handle_user_message(
         self, *, session: PracticeSession, material: LearningMaterial, user_content: str
     ) -> SessionStepResult:
         instruction = session.current_instruction
@@ -119,25 +113,17 @@ class DirectLearningSessionRunner:
             for item in corrections
         ]
 
-        review_items_task = asyncio.create_task(
-            self._llm_provider.create_review_items(
-                corrections=corrections, material=material
-            )
+        assistant_text = await self._llm_provider.generate_reply(
+            current_instruction=instruction,
+            material=material,
+            message_history=[*session.messages, user_message],
+            user_message=user_message,
+            corrections=corrections,
+            target_language=material.target_language,
         )
 
-        assistant_text_task = asyncio.create_task(
-            self._llm_provider.generate_reply(
-                current_instruction=instruction,
-                material=material,
-                message_history=[*session.messages, user_message],
-                user_message=user_message,
-                corrections=corrections,
-                target_language=material.target_language,
-            )
-        )
-
-        review_items, assistant_text = await asyncio.gather(
-            review_items_task, assistant_text_task
+        review_items = await self._llm_provider.create_review_items(
+            corrections=corrections, material=material
         )
         review_items = [
             (
@@ -193,6 +179,13 @@ class DirectLearningSessionRunner:
             assistant_message=assistant_message,
             feedback_items=corrections,
             review_items=review_items,
+        )
+
+    async def handler_user_message(
+        self, *, session: PracticeSession, material: LearningMaterial, user_content: str
+    ) -> SessionStepResult:
+        return await self.handle_user_message(
+            session=session, material=material, user_content=user_content
         )
 
 

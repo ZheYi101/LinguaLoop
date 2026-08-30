@@ -1,8 +1,5 @@
-from loguru import logger
+import lingualoop
 
-logger.add("msg.log")
 
-logger.info("info msg")
-logger.warning("warning msg")
-logger.error("error msg")
-logger.critical("critical msg")
+def test_package_imports() -> None:
+    assert lingualoop.__doc__

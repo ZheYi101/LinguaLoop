@@ -16,6 +16,15 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"
 
 
+def _clean_required_text(value: str | StrEnum) -> str | StrEnum:
+    if isinstance(value, StrEnum):
+        return value
+    value = value.strip()
+    if not value:
+        raise ValueError("required text fields must not be blank")
+    return value
+
+
 class DomainModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -111,11 +120,8 @@ class UserProfile(DomainModel):
 
     @field_validator("native_language", "target_language")
     @classmethod
-    def _language_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("language fields must not be blank")
-        return value
+    def _language_must_not_be_blank(cls, value: str | LanguageEnum) -> str | LanguageEnum:
+        return _clean_required_text(value)
 
 
 class MaterialExpression(DomainModel):
@@ -144,11 +150,8 @@ class LearningMaterial(DomainModel):
 
     @field_validator("title", "target_language", "native_language", "content")
     @classmethod
-    def _required_text_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("required text fields must not be blank")
-        return value
+    def _required_text_must_not_be_blank(cls, value: str | LanguageEnum) -> str | LanguageEnum:
+        return _clean_required_text(value)
 
 
 class PracticeInstruction(DomainModel):
