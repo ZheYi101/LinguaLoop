@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "A conversational language learning platform built around reviewable learning loops."
 requires-python = ">=3.11"
 dependencies = [
+    "dotenv>=0.9.9",
+    "langchain-openai>=1.6.0",
     "langgraph>=0.2",
     "loguru>=0.7.3",
     "pydantic>=2",

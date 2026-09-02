@@ -50,3 +50,28 @@ python -m pytest
 4. 明确第一版 LLM 接入策略：PydanticAI adapter、兼容 OpenAI 的 provider，或轻量自写 adapter
 5. 定义插件 manifest、Pattern contract、capability requirements 和权限模型
 6. 确定开源许可证
+
+## 真实 AI 冒烟测试
+
+默认 `python -m pytest` 不会调用真实模型。要测试 OpenAI-compatible LangGraph 节点，请在本地 `.env` 配置：
+
+```dotenv
+DEEPSEEK_API_KEY=your_api_key
+DEEPSEEK_BASE_URL=https://api.centos.hk/v1
+DEEPSEEK_MODEL=your_model_id
+RUN_REAL_AI_TESTS=1
+```
+
+如果不确定中转站可用模型名，先运行：
+
+```powershell
+.venv\Scripts\python.exe scripts\list_openai_models.py
+```
+
+再把返回列表里的模型 id 填到 `DEEPSEEK_MODEL`。然后运行真实 AI 冒烟测试：
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests\test_graph.py -q
+```
+
+不要提交 `.env` 文件；仓库已在 `.gitignore` 中忽略本地环境文件。

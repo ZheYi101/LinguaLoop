@@ -8,6 +8,7 @@ from lingualoop.core import (
     PracticeInstruction,
     ProficiencyLevel,
     ReviewItem,
+    MessageRole,
 )
 from lingualoop.engine.langgraph import build_learning_session_graph
 
@@ -75,7 +76,7 @@ def test_langgraph_learning_session_smoke() -> None:
                 "learner_level": ProficiencyLevel.A2,
                 "target_language": LanguageEnum.ENGLISH,
                 "user_message": Message(
-                    role="user",
+                    role=MessageRole.USER,
                     content="Yesterday I go to market.",
                 ),
             }
@@ -89,3 +90,53 @@ def test_langgraph_learning_session_smoke() -> None:
         assert len(result["review_items"]) == 1
 
     asyncio.run(run_case())
+
+
+def test_graph_streams_intermediate_updates() -> None:
+    async def run_case() -> None:
+        # build_learning_session_graph return a compiled stateGraph
+        graph = build_learning_session_graph(FakeLearningLLMProvider())
+        graph.update_state(
+            config={"configurable": {"thread_id": "1"}},
+            values={"my_key": "initial_value"},
+            as_node="node1",
+        )
+        a = graph.get_state()
+
+        updates = []
+        async for update in graph.astream(
+            {
+                "material": _material(),
+                "learner_level": ProficiencyLevel.A2,
+                "target_language": LanguageEnum.ENGLISH,
+                "user_message": Message(
+                    role=MessageRole.USER,
+                    content="Yesterday I go to market.",
+                ),
+            },
+            stream_mode="updates",
+        ):
+            updates.append(update)
+
+        assert "create_task" in updates[0]
+        assert "current_instruction" in updates[0]["create_task"]
+
+        assert "correct_answer" in updates[1]
+        assert "corrections" in updates[1]["correct_answer"]
+
+        assert "generate_reply" in updates[2]
+        assert "assistant_message" in updates[2]["generate_reply"]
+
+        assert "create_review_items" in updates[3]
+        assert "review_items" in updates[3]["create_review_items"]
+
+    asyncio.run(run_case())
+
+
+def _material() -> LearningMaterial:
+    return LearningMaterial(
+        title="Market trip",
+        target_language=LanguageEnum.ENGLISH,
+        native_language=LanguageEnum.CHINESE,
+        content="Yesterday I went to the market.",
+    )

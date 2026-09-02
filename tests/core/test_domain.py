@@ -1,3 +1,4 @@
+import loguru
 import pytest
 from pydantic import ValidationError
 
@@ -10,10 +11,57 @@ from lingualoop.core import (
     PracticePlan,
     PracticeSession,
     ProficiencyLevel,
+    UserProfile,
 )
 
 
-def test_learning_material_rejects_blank_content() -> None:
+def test_user_profile_defaults_learner_level_to_unknown() -> None:
+    profile = UserProfile(
+        native_language=LanguageEnum.ENGLISH,
+        target_language=LanguageEnum.JAPANESE,
+    )
+
+    assert profile.learner_level is ProficiencyLevel.UNKNOWN
+
+
+def test_user_profile_requires_target_language() -> None:
+    with pytest.raises(ValidationError):
+        UserProfile(native_language=LanguageEnum.ENGLISH)
+
+
+def test_user_profile_has_generated_id() -> None:
+    profile = UserProfile(
+        native_language=LanguageEnum.ENGLISH,
+        target_language=LanguageEnum.JAPANESE,
+    )
+
+    assert profile.id.startswith("user_")
+
+
+def test_user_profile_rejects_invalid_language_value() -> None:
+    with pytest.raises(ValidationError):
+        UserProfile(
+            native_language="English",
+            target_language=LanguageEnum.JAPANESE,
+        )
+
+
+def test_user_profile_goals_default_is_not_shared() -> None:
+    first = UserProfile(
+        native_language=LanguageEnum.ENGLISH,
+        target_language=LanguageEnum.JAPANESE,
+    )
+    second = UserProfile(
+        native_language=LanguageEnum.ENGLISH,
+        target_language=LanguageEnum.JAPANESE,
+    )
+
+    first.goals.append("Practice travel conversation")
+
+    assert second.goals == []
+
+
+def test_learning_material_rejects_blank_content():
     with pytest.raises(ValidationError):
         LearningMaterial(
             title="Market trip",
@@ -23,7 +71,7 @@ def test_learning_material_rejects_blank_content() -> None:
         )
 
 
-def test_language_enum_fields_remain_enums() -> None:
+def test_language_enum_fields_remain_enums():
     material = LearningMaterial(
         title="Market trip",
         target_language=LanguageEnum.ENGLISH,
@@ -35,7 +83,7 @@ def test_language_enum_fields_remain_enums() -> None:
     assert material.native_language is LanguageEnum.CHINESE
 
 
-def test_message_rejects_blank_content() -> None:
+def test_message_rejects_blank_content():
     with pytest.raises(ValidationError):
         Message(role=MessageRole.USER, content=" ")
 
