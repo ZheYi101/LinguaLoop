@@ -65,7 +65,6 @@ def test_learning_material_rejects_blank_content():
     with pytest.raises(ValidationError):
         LearningMaterial(
             title="Market trip",
-            target_language=LanguageEnum.ENGLISH,
             source_language=LanguageEnum.CHINESE,
             content="   ",
         )
@@ -74,12 +73,10 @@ def test_learning_material_rejects_blank_content():
 def test_language_enum_fields_remain_enums():
     material = LearningMaterial(
         title="Market trip",
-        target_language=LanguageEnum.ENGLISH,
         source_language=LanguageEnum.CHINESE,
         content="Yesterday I went to the market.",
     )
 
-    assert material.target_language is LanguageEnum.ENGLISH
     assert material.source_language is LanguageEnum.CHINESE
 
 
@@ -92,7 +89,6 @@ def test_domain_models_forbid_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         LearningMaterial(
             title="Market trip",
-            target_language=LanguageEnum.ENGLISH,
             source_language=LanguageEnum.CHINESE,
             content="Yesterday I went to the market.",
             unknown_field=True,
@@ -105,7 +101,11 @@ def test_practice_session_current_instruction_returns_latest_instruction() -> No
     session = PracticeSession(
         material_id="mat_1",
         pattern_id="guided_roleplay",
-        learner_level=ProficiencyLevel.A2,
+        profile={
+            "profile_level": ProficiencyLevel.A2,
+            "native_language": LanguageEnum.CHINESE,
+            "target_language": LanguageEnum.ENGLISH,
+        },
         plan=PracticePlan(
             pattern_id="guided_roleplay",
             title="Market trip practice",

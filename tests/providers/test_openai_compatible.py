@@ -105,8 +105,10 @@ def test_provider_routes_reply_to_dialogue_client() -> None:
 def test_provider_parses_feedback_and_review_items() -> None:
     async def run_case() -> None:
         reasoning_client = FakeChatClient(
+            "```json\n"
             '[{"error_type":"grammar","original":"I go","corrected":"I went",'
-            '"explanation":"Use past tense."}]'
+            '"explanation":"Use past tense."}]\n'
+            "```"
         )
         provider = OpenAICompatibleLLMProvider(
             _settings(),
@@ -123,7 +125,9 @@ def test_provider_parses_feedback_and_review_items() -> None:
         provider = OpenAICompatibleLLMProvider(
             _settings(),
             reasoning_client=FakeChatClient(
-                '[{"kind":"cloze","prompt":"I ___ home.","answer":"went"}]'
+                "```json\n"
+                '[{"kind":"cloze","prompt":"I ___ home.","answer":"went"}]\n'
+                "```"
             ),
             dialogue_client=FakeChatClient("unused"),
         )

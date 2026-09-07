@@ -1,59 +1,22 @@
+import asyncio
 import os
-from typing import TypedDict
-from urllib.parse import urlparse
 
 import pytest
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
-from langgraph.graph import END, START, MessagesState, StateGraph
-from pydantic import SecretStr
+
+from lingualoop.core import (
+    LanguageEnum,
+    LearningMaterial,
+    Message,
+    MessageRole,
+    ProficiencyLevel,
+)
+from lingualoop.engine.langgraph import build_learning_session_graph
+from lingualoop.providers import OpenAICompatibleLLMProvider
 
 load_dotenv()
 
 RUN_REAL_AI_TESTS = os.getenv("RUN_REAL_AI_TESTS", "").strip() == "1"
-
-
-def env_or_skip(name: str) -> str:
-    value = os.getenv(name)
-    if not value:
-        pytest.skip(f"Set {name} to run the real OpenAI-compatible smoke test.")
-    return value
-
-
-def normalize_openai_base_url(raw_base_url: str) -> str:
-    base_url = raw_base_url.strip().rstrip("/")
-    parsed = urlparse(base_url)
-    if not parsed.scheme or not parsed.netloc:
-        pytest.fail(f"OPENAI_BASE_URL is not a valid URL: {raw_base_url!r}")
-    if parsed.path in ("", "/"):
-        return f"{base_url}/v1"
-    return base_url
-
-
-def build_openai_llm() -> ChatOpenAI:
-    api_key = env_or_skip("OPENAI_API_KEY")
-    base_url = normalize_openai_base_url(env_or_skip("OPENAI_BASE_URL"))
-    model = env_or_skip("OPENAI_MODEL")
-
-    return ChatOpenAI(
-        model=model,
-        api_key=SecretStr(api_key),
-        base_url=base_url,
-        temperature=0,
-        timeout=30,
-        use_responses_api=False,
-    )
-
-
-def llm_node(state: MessagesState) -> dict:
-    """Call the configured OpenAI-compatible LLM."""
-    system_prompt = SystemMessage(
-        content="You are a concise language learning assistant. Answer in Chinese."
-    )
-    response = build_openai_llm().invoke([system_prompt, *state["messages"]])
-
-    return {"messages": [response]}
 
 
 def is_model_routing_error(error: Exception) -> bool:
@@ -61,29 +24,44 @@ def is_model_routing_error(error: Exception) -> bool:
     return "model_not_found" in message or "No available channel for model" in message
 
 
-def test_llm_graph_smoke():
-    builder = StateGraph(MessagesState)
+@pytest.mark.skipif(
+    not RUN_REAL_AI_TESTS,
+    reason="Set RUN_REAL_AI_TESTS=1 to run the real OpenAI-compatible graph smoke test.",
+)
+def test_real_openai_compatible_provider_through_langgraph_smoke() -> None:
+    async def run_case() -> None:
+        provider = OpenAICompatibleLLMProvider.from_env()
+        graph = build_learning_session_graph(provider)
 
-    builder.add_node("llm", llm_node)
-    builder.add_edge(START, "llm")
-    builder.add_edge("llm", END)
-    graph = builder.compile()
-    try:
-        result = graph.invoke(
-            {
-                "messages": [
-                    HumanMessage(content="What is LinguaLoop? Reply in Chinese.")
-                ]
-            }
-        )
-    except Exception as exc:
-        if is_model_routing_error(exc):
-            pytest.fail(
-                "Configured MODEL is not available for the current API key "
-                "group. Run `python scripts/list_openai_models.py` and set "
-                "MODEL to one of the returned model ids."
+        try:
+            result = await graph.ainvoke(
+                {
+                    "material": LearningMaterial(
+                        title="Market trip",
+                        source_language=LanguageEnum.ENGLISH,
+                        content="Yesterday I went to the market and bought apples.",
+                    ),
+                    "learner_level": ProficiencyLevel.A2,
+                    "target_language": LanguageEnum.ENGLISH,
+                    "user_message": Message(
+                        role=MessageRole.USER,
+                        content="Yesterday I go market and buy apple.",
+                    ),
+                }
             )
-        raise
+        except Exception as exc:
+            if is_model_routing_error(exc):
+                pytest.fail(
+                    "Configured model is not available for the current API key "
+                    "group. Set OPENAI_REASONING_MODEL and OPENAI_DIALOGUE_MODEL "
+                    "to model ids returned by your OpenAI-compatible provider."
+                )
+            raise
 
-    assert "messages" in result
-    assert str(result["messages"][-1].content).strip()
+        assert result["current_instruction"].prompt.strip()
+        assert isinstance(result["assistant_message"], str)
+        assert result["assistant_message"].strip()
+        assert isinstance(result["corrections"], list)
+        assert isinstance(result["review_items"], list)
+
+    asyncio.run(run_case())

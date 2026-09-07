@@ -64,7 +64,6 @@ def test_langgraph_learning_session_smoke() -> None:
     async def run_case() -> None:
         material = LearningMaterial(
             title="Market trip",
-            target_language=LanguageEnum.ENGLISH,
             source_language=LanguageEnum.CHINESE,
             content="Yesterday I went to the market.",
         )
@@ -94,14 +93,7 @@ def test_langgraph_learning_session_smoke() -> None:
 
 def test_graph_streams_intermediate_updates() -> None:
     async def run_case() -> None:
-        # build_learning_session_graph return a compiled stateGraph
         graph = build_learning_session_graph(FakeLearningLLMProvider())
-        graph.update_state(
-            config={"configurable": {"thread_id": "1"}},
-            values={"my_key": "initial_value"},
-            as_node="node1",
-        )
-        a = graph.get_state()
 
         updates = []
         async for update in graph.astream(
@@ -136,7 +128,6 @@ def test_graph_streams_intermediate_updates() -> None:
 def _material() -> LearningMaterial:
     return LearningMaterial(
         title="Market trip",
-        target_language=LanguageEnum.ENGLISH,
         source_language=LanguageEnum.CHINESE,
         content="Yesterday I went to the market.",
     )

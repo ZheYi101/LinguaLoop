@@ -23,6 +23,7 @@ from lingualoop.core.domain import (
     SessionEvent,
     SessionEventType,
     SessionStatus,
+    SessionUserProfile,
     UserProfile,
 )
 from lingualoop.core.ports import EventStore, LearningLLMProvider
@@ -52,5 +53,6 @@ __all__ = [
     "SessionEvent",
     "SessionEventType",
     "SessionStatus",
+    "SessionUserProfile",
     "UserProfile",
 ]

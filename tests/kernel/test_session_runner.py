@@ -9,6 +9,7 @@ from lingualoop.core import (
     ProficiencyLevel,
     ReviewItem,
     SessionEventType,
+    SessionUserProfile,
 )
 from lingualoop.kernel import DirectLearningSessionRunner, InMemoryEventStore
 
@@ -74,7 +75,7 @@ def test_direct_runner_starts_session_with_plan_and_events() -> None:
 
         result = await runner.start_session(
             material=material,
-            profile_level=ProficiencyLevel.A2,
+            profile=_profile(),
         )
 
         assert result.session.material_id == material.id
@@ -97,7 +98,7 @@ def test_direct_runner_handles_user_message_with_feedback_and_review_items() -> 
         runner = DirectLearningSessionRunner(FakeLearningLLMProvider(), store)
         started = await runner.start_session(
             material=material,
-            profile_level=ProficiencyLevel.A2,
+            profile=_profile(),
         )
 
         result = await runner.handle_user_message(
@@ -126,7 +127,14 @@ def test_direct_runner_handles_user_message_with_feedback_and_review_items() -> 
 def _material() -> LearningMaterial:
     return LearningMaterial(
         title="Market trip",
-        target_language=LanguageEnum.ENGLISH,
         source_language=LanguageEnum.CHINESE,
         content="Yesterday I went to the market.",
+    )
+
+
+def _profile() -> SessionUserProfile:
+    return SessionUserProfile(
+        profile_level=ProficiencyLevel.A2,
+        native_language=LanguageEnum.CHINESE,
+        target_language=LanguageEnum.ENGLISH,
     )

@@ -53,12 +53,14 @@ python -m pytest
 
 ## 真实 AI 冒烟测试
 
-默认 `python -m pytest` 不会调用真实模型。要测试 OpenAI-compatible LangGraph 节点，请在本地 `.env` 配置：
+默认 `python -m pytest` 不应调用真实模型。要测试从 LangGraph 到 OpenAI-compatible provider 再到真实模型的完整链路，请在本地 `.env` 配置：
 
 ```dotenv
-DEEPSEEK_API_KEY=your_api_key
-DEEPSEEK_BASE_URL=https://api.centos.hk/v1
-DEEPSEEK_MODEL=your_model_id
+OPENAI_API_KEY=your_api_key
+OPENAI_BASE_URL=https://api.centos.hk/v1
+OPENAI_REASONING_MODEL=your_reasoning_model_id
+OPENAI_DIALOGUE_MODEL=your_dialogue_model_id
+OPENAI_DISABLE_THINKING=1
 RUN_REAL_AI_TESTS=1
 ```
 
@@ -68,10 +70,10 @@ RUN_REAL_AI_TESTS=1
 .venv\Scripts\python.exe scripts\list_openai_models.py
 ```
 
-再把返回列表里的模型 id 填到 `DEEPSEEK_MODEL`。然后运行真实 AI 冒烟测试：
+再把返回列表里的模型 id 填到 `OPENAI_REASONING_MODEL` 和 `OPENAI_DIALOGUE_MODEL`。然后运行真实 AI 冒烟测试：
 
 ```powershell
-.venv\Scripts\python.exe -m pytest tests\test_graph.py -q
+.venv\Scripts\python.exe -m pytest tests\test_llm.py -q
 ```
 
 不要提交 `.env` 文件；仓库已在 `.gitignore` 中忽略本地环境文件。

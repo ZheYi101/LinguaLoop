@@ -20,7 +20,7 @@ class LearningState(TypedDict, total=False):
     target_language: Required[LanguageEnum]
     user_message: Required[Message]
     current_instruction: NotRequired[PracticeInstruction]
-    assistant_message: NotRequired[Message]
+    assistant_message: NotRequired[str]
     corrections: NotRequired[list[FeedbackItem]]
     review_items: NotRequired[list[ReviewItem]]
 

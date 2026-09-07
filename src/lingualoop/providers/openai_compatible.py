@@ -288,7 +288,7 @@ def _feedback_to_text(corrections: list[FeedbackItem]) -> str:
 
 def _parse_feedback_items(content: str) -> list[FeedbackItem]:
     try:
-        payload = json.loads(content)
+        payload = _load_json_response(content)
     except json.JSONDecodeError as exc:
         raise ValueError(
             f"LLM returned non-JSON feedback content: {content[:500]}"
@@ -317,7 +317,7 @@ def _parse_feedback_items(content: str) -> list[FeedbackItem]:
 
 def _parse_review_items(content: str) -> list[ReviewItem]:
     try:
-        payload = json.loads(content)
+        payload = _load_json_response(content)
     except json.JSONDecodeError as exc:
         raise ValueError(
             f"LLM returned non-JSON review content: {content[:500]}"
@@ -349,3 +349,27 @@ def _review_item_kind(value: Any) -> ReviewItemKind:
         except ValueError:
             return ReviewItemKind.CLOZE
     return ReviewItemKind.CLOZE
+
+
+def _load_json_response(content: str) -> Any:
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        array_start = text.find("[")
+        array_end = text.rfind("]")
+        object_start = text.find("{")
+        object_end = text.rfind("}")
+        if array_start != -1 and array_end > array_start:
+            return json.loads(text[array_start : array_end + 1])
+        if object_start != -1 and object_end > object_start:
+            return json.loads(text[object_start : object_end + 1])
+        raise
