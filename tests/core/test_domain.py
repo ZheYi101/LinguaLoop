@@ -66,7 +66,7 @@ def test_learning_material_rejects_blank_content():
         LearningMaterial(
             title="Market trip",
             target_language=LanguageEnum.ENGLISH,
-            native_language=LanguageEnum.CHINESE,
+            source_language=LanguageEnum.CHINESE,
             content="   ",
         )
 
@@ -75,12 +75,12 @@ def test_language_enum_fields_remain_enums():
     material = LearningMaterial(
         title="Market trip",
         target_language=LanguageEnum.ENGLISH,
-        native_language=LanguageEnum.CHINESE,
+        source_language=LanguageEnum.CHINESE,
         content="Yesterday I went to the market.",
     )
 
     assert material.target_language is LanguageEnum.ENGLISH
-    assert material.native_language is LanguageEnum.CHINESE
+    assert material.source_language is LanguageEnum.CHINESE
 
 
 def test_message_rejects_blank_content():
@@ -93,7 +93,7 @@ def test_domain_models_forbid_unknown_fields() -> None:
         LearningMaterial(
             title="Market trip",
             target_language=LanguageEnum.ENGLISH,
-            native_language=LanguageEnum.CHINESE,
+            source_language=LanguageEnum.CHINESE,
             content="Yesterday I went to the market.",
             unknown_field=True,
         )

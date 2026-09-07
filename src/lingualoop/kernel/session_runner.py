@@ -14,6 +14,7 @@ from lingualoop.core.domain import (
     ReviewItem,
     SessionEvent,
     SessionEventType,
+    SessionUserProfile,
     utc_now,
 )
 from lingualoop.core.ports import EventStore, LearningLLMProvider
@@ -42,13 +43,13 @@ class DirectLearningSessionRunner:
         self,
         *,
         material: LearningMaterial,
-        profile_level: ProficiencyLevel,
+        profile: SessionUserProfile,
         pattern_id: str = DEFAULT_PATTERN_ID,
     ) -> SessionStepResult:
         task_prompt = await self._llm_provider.generate_task(
             material=material,
-            learner_level=profile_level,
-            target_language=material.target_language,
+            learner_level=profile.profile_level,
+            target_language=profile.target_language,
         )
 
         instruction = PracticeInstruction(
@@ -67,8 +68,8 @@ class DirectLearningSessionRunner:
         session = PracticeSession(
             material_id=material.id,
             pattern_id=pattern_id,
-            learner_level=profile_level,
             plan=plan,
+            profile=profile,
             messages=[assistant_message],
         )
 
@@ -79,7 +80,7 @@ class DirectLearningSessionRunner:
                 payload={
                     "material_id": material.id,
                     "pattern_id": pattern_id,
-                    "learner_level": str(profile_level),
+                    "learner_level": str(profile.profile_level),
                     "plan_id": plan.id,
                 },
             ),
@@ -101,7 +102,7 @@ class DirectLearningSessionRunner:
         corrections = await self._llm_provider.correct_answer(
             current_instruction=instruction,
             user_message=user_message,
-            target_language=material.target_language,
+            target_language=session.profile.target_language,
         )
 
         corrections = [
@@ -119,7 +120,7 @@ class DirectLearningSessionRunner:
             message_history=[*session.messages, user_message],
             user_message=user_message,
             corrections=corrections,
-            target_language=material.target_language,
+            target_language=session.profile.target_language,
         )
 
         review_items = await self._llm_provider.create_review_items(

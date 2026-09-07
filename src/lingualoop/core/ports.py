@@ -13,8 +13,9 @@ from lingualoop.core.domain import (
 
 
 class LearningLLMProvider(Protocol):
-    """similar to interface in Typescript and Java
-    need to be implemented in other file"""
+    """defining basic protocol of LLM
+    protocol is similar to interface in Typescript and Java
+    need to be implemented by other classes"""
 
     async def generate_task(
         self,

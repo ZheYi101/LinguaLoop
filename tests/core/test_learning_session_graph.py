@@ -65,7 +65,7 @@ def test_langgraph_learning_session_smoke() -> None:
         material = LearningMaterial(
             title="Market trip",
             target_language=LanguageEnum.ENGLISH,
-            native_language=LanguageEnum.CHINESE,
+            source_language=LanguageEnum.CHINESE,
             content="Yesterday I went to the market.",
         )
         graph = build_learning_session_graph(FakeLearningLLMProvider())
@@ -137,6 +137,6 @@ def _material() -> LearningMaterial:
     return LearningMaterial(
         title="Market trip",
         target_language=LanguageEnum.ENGLISH,
-        native_language=LanguageEnum.CHINESE,
+        source_language=LanguageEnum.CHINESE,
         content="Yesterday I went to the market.",
     )

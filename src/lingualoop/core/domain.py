@@ -42,6 +42,14 @@ class ProficiencyLevel(StrEnum):
     UNKNOWN = "unknown"
 
 
+class SessionUserProfile(DomainModel):
+    """a profile used in a specific session"""
+
+    profile_level: ProficiencyLevel
+    native_language: LanguageEnum
+    target_language: LanguageEnum
+
+
 class CorrectionIntensity(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
@@ -120,7 +128,9 @@ class UserProfile(DomainModel):
 
     @field_validator("native_language", "target_language")
     @classmethod
-    def _language_must_not_be_blank(cls, value: str | LanguageEnum) -> str | LanguageEnum:
+    def _language_must_not_be_blank(
+        cls, value: str | LanguageEnum
+    ) -> str | LanguageEnum:
         return _clean_required_text(value)
 
 
@@ -141,16 +151,17 @@ class MaterialAnalysis(DomainModel):
 class LearningMaterial(DomainModel):
     id: str = Field(default_factory=lambda: new_id("mat"))
     title: str
-    target_language: LanguageEnum
-    native_language: LanguageEnum
+    source_language: LanguageEnum
     content: str
     source_type: MaterialSourceType = MaterialSourceType.TEXT
     analysis: MaterialAnalysis | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
-    @field_validator("title", "target_language", "native_language", "content")
+    @field_validator("title", "content", "source_language")
     @classmethod
-    def _required_text_must_not_be_blank(cls, value: str | LanguageEnum) -> str | LanguageEnum:
+    def _required_text_must_not_be_blank(
+        cls, value: str | LanguageEnum
+    ) -> str | LanguageEnum:
         return _clean_required_text(value)
 
 
@@ -216,7 +227,7 @@ class PracticeSession(DomainModel):
     id: str = Field(default_factory=lambda: new_id("session"))
     material_id: str
     pattern_id: str
-    learner_level: ProficiencyLevel
+    profile: SessionUserProfile
     status: SessionStatus = SessionStatus.ACTIVE
     plan: PracticePlan | None = None
     messages: list[Message] = Field(default_factory=list)

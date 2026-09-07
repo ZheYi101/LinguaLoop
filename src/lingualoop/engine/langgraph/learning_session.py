@@ -26,6 +26,8 @@ class LearningState(TypedDict, total=False):
 
 
 def build_learning_session_graph(llm_provider: LearningLLMProvider):
+    """langgraph logical function. containing several second packaged function from ports.py"""
+
     async def create_task(state: LearningState) -> dict:
         task_prompt = await llm_provider.generate_task(
             material=state["material"],

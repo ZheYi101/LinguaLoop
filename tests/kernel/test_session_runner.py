@@ -127,6 +127,6 @@ def _material() -> LearningMaterial:
     return LearningMaterial(
         title="Market trip",
         target_language=LanguageEnum.ENGLISH,
-        native_language=LanguageEnum.CHINESE,
+        source_language=LanguageEnum.CHINESE,
         content="Yesterday I went to the market.",
     )

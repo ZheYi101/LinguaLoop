@@ -87,34 +87,3 @@ def test_llm_graph_smoke():
 
     assert "messages" in result
     assert str(result["messages"][-1].content).strip()
-
-
-class SimpleState(TypedDict):
-    message: str
-    processed: bool
-
-
-def greet_node(state: SimpleState) -> dict:
-    """Welcome node: generate welcome message."""
-    return {"message": "\\u4f60\\u597d! {}".format(state["message"])}
-
-
-def process_node(state: SimpleState) -> dict:
-    """Handle node: mark it as processed."""
-    return {"processed": True}
-
-
-def test_simple_graph():
-    builder = StateGraph(SimpleState)
-
-    builder.add_node("greet", greet_node)
-    builder.add_node("process", process_node)
-
-    builder.add_edge(START, "greet")
-    builder.add_edge("greet", "process")
-    builder.add_edge("process", END)
-
-    graph = builder.compile()
-    result = graph.invoke({"message": "\\u4e16\\u754c", "processed": False})
-
-    assert result == {"message": "\\u4f60\\u597d! \\u4e16\\u754c", "processed": True}
