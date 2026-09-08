@@ -7,6 +7,8 @@ from lingualoop.core import (
     FeedbackItem,
     LanguageEnum,
     LearningMaterial,
+    MaterialAnalysis,
+    MaterialExpression,
     Message,
     MessageRole,
     PracticeInstruction,
@@ -51,6 +53,39 @@ def test_settings_build_client_kwargs_with_thinking_disabled() -> None:
     assert reasoning_kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
     assert dialogue_kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
     assert reasoning_kwargs["use_responses_api"] is False
+
+
+def test_provider_parses_material_analysis() -> None:
+    async def run_case() -> None:
+        reasoning_client = FakeChatClient(
+            '{"summary":"Short summary","keywords":["market"],'
+            '"expressions":[{"text":"went to the market","meaning":"visited a market"}],'
+            '"difficulties":["past tense"],"suggested_goals":["retell the material"]}'
+        )
+        provider = OpenAICompatibleLLMProvider(
+            _settings(),
+            reasoning_client=reasoning_client,
+            dialogue_client=FakeChatClient("unused"),
+        )
+
+        analysis = await provider.analyze_material(
+            material=_material(),
+            target_language=LanguageEnum.ENGLISH,
+            native_language=LanguageEnum.CHINESE,
+        )
+
+        assert isinstance(analysis, MaterialAnalysis)
+        assert analysis.summary == "Short summary"
+        assert analysis.keywords == ["market"]
+        assert analysis.expressions[0] == MaterialExpression(
+            text="went to the market",
+            meaning="visited a market",
+            example=None,
+        )
+        assert analysis.difficulties == ["past tense"]
+        assert analysis.suggested_goals == ["retell the material"]
+
+    asyncio.run(run_case())
 
 
 def test_provider_routes_generation_to_reasoning_client() -> None:

@@ -4,6 +4,7 @@ from lingualoop.core import (
     FeedbackItem,
     LanguageEnum,
     LearningMaterial,
+    MaterialAnalysis,
     Message,
     PracticeInstruction,
     ProficiencyLevel,
@@ -14,6 +15,21 @@ from lingualoop.engine.langgraph import build_learning_session_graph
 
 
 class FakeLearningLLMProvider:
+    async def analyze_material(
+        self,
+        *,
+        material: LearningMaterial,
+        target_language: LanguageEnum,
+        native_language: LanguageEnum,
+    ) -> MaterialAnalysis:
+        return MaterialAnalysis(
+            summary="Mock summary.",
+            keywords=[],
+            expressions=[],
+            difficulties=[],
+            suggested_goals=[],
+        )
+
     async def generate_task(
         self,
         *,

@@ -14,6 +14,8 @@ from lingualoop.core.domain import (
     FeedbackItem,
     FeedbackType,
     LanguageEnum,
+    MaterialAnalysis,
+    MaterialExpression,
     LearningMaterial,
     Message,
     PracticeInstruction,
@@ -109,6 +111,36 @@ class OpenAICompatibleLLMProvider(LearningLLMProvider):
             ),
         ]
         return await self._invoke_text(self._reasoning_client, messages)
+
+    async def analyze_material(
+        self,
+        *,
+        material: LearningMaterial,
+        target_language: LanguageEnum,
+        native_language: LanguageEnum,
+    ) -> MaterialAnalysis:
+        messages = [
+            SystemMessage(
+                content=(
+                    "Analyze the learning material and return only a JSON object "
+                    "with these fields: summary, keywords, expressions, difficulties, "
+                    "suggested_goals. Each expression must contain text, meaning, "
+                    "and optionally example. Keep the result concise and useful for "
+                    "a language learner."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"Source language: {material.source_language.value}\n"
+                    f"Target language: {target_language.value}\n"
+                    f"Learner native language: {native_language.value}\n"
+                    f"Material title: {material.title}\n"
+                    f"Material content:\n{material.content}"
+                )
+            ),
+        ]
+        content = await self._invoke_text(self._reasoning_client, messages)
+        return _parse_material_analysis(content)
 
     async def generate_reply(
         self,
@@ -313,6 +345,50 @@ def _parse_feedback_items(content: str) -> list[FeedbackItem]:
                 )
             )
     return items
+
+
+def _parse_material_analysis(content: str) -> MaterialAnalysis:
+    try:
+        payload = _load_json_response(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"LLM returned non-JSON material analysis: {content[:500]}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError("material analysis response must be a JSON object")
+
+    raw_expressions = payload.get("expressions", [])
+    expressions: list[MaterialExpression] = []
+    if isinstance(raw_expressions, list):
+        for raw_expression in raw_expressions:
+            if not isinstance(raw_expression, dict):
+                continue
+            text = str(raw_expression.get("text", "")).strip()
+            if not text:
+                continue
+            meaning = raw_expression.get("meaning")
+            example = raw_expression.get("example")
+            expressions.append(
+                MaterialExpression(
+                    text=text,
+                    meaning=str(meaning).strip() if meaning is not None else None,
+                    example=str(example).strip() if example is not None else None,
+                )
+            )
+
+    def text_list(key: str) -> list[str]:
+        value = payload.get(key, [])
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    return MaterialAnalysis(
+        summary=str(payload.get("summary", "")).strip(),
+        keywords=text_list("keywords"),
+        expressions=expressions,
+        difficulties=text_list("difficulties"),
+        suggested_goals=text_list("suggested_goals"),
+    )
 
 
 def _parse_review_items(content: str) -> list[ReviewItem]:

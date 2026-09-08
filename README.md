@@ -4,7 +4,7 @@ LinguaLoop 是一个开源的对话式语言学习平台。项目目标是把「
 
 ## 当前状态
 
-项目处于初始化阶段。本仓库目前包含基础文档和 Python core 的早期脚手架，用于沉淀产品边界、MVP 范围、架构方向和协作规范。正式应用尚未创建。
+项目处于初始化阶段。本仓库目前包含基础文档、Python core 的早期脚手架、CLI POC，以及一个最小桌面端 POC，用于沉淀产品边界、MVP 范围、架构方向和协作规范。
 
 ## 产品方向
 
@@ -77,3 +77,50 @@ RUN_REAL_AI_TESTS=1
 ```
 
 不要提交 `.env` 文件；仓库已在 `.gitignore` 中忽略本地环境文件。
+
+## CLI POC
+
+现在已经有一个无 UI 的命令行原型，可以先验证完整闭环：
+
+```powershell
+lingualoop --mock
+```
+
+如果还没把项目同步进当前环境，先执行 `uv sync --dev`，或者临时用 `PYTHONPATH=src` 再运行。
+
+常用命令：
+
+- `load`：加载并分析材料
+- `start`：开始一次练习会话
+- `say`：发送用户回答
+- `review`：查看复习项
+- `summary`：查看当前会话摘要
+- `export`：导出会话 JSON
+- `reset`：清空当前状态
+- `quit`：退出
+
+默认模式会读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_REASONING_MODEL` 和 `OPENAI_DIALOGUE_MODEL`。离线调试可用 `--mock`。
+
+## Desktop POC
+
+桌面端当前采用 `PySide6 + QML + Qt Quick Controls 6 + KDE Kirigami`。PySide6 通过 Python 依赖安装，Kirigami 需要系统或平台提供对应的 `org.kde.kirigami` QML runtime：
+
+```powershell
+uv sync --extra desktop
+```
+
+启动最小桌面壳。桌面端默认使用真实 OpenAI-compatible provider，并读取当前工作目录 `.env` 或系统环境变量中的 `OPENAI_*` 配置：
+
+```powershell
+uv run lingualoop-desktop
+```
+
+离线调试时可以显式使用 mock provider，不需要真实 API key：
+
+```powershell
+uv run lingualoop-desktop --mock
+```
+
+桌面端默认中文界面。当前桌面端是共享桌面/Android 页面和最小学习闭环的 POC，不代表最终 UI 或完整客户端功能。Kirigami runtime 的平台要求见 [docs/desktop/QML_RUNTIME.md](./docs/desktop/QML_RUNTIME.md)。
+
+Windows 用户可按 [QML runtime 文档](./docs/desktop/QML_RUNTIME.md) 安装 KDE Craft 和 Kirigami。仓库提供 `scripts/setup_kirigami_windows.ps1` 自动发现 Craft runtime 并配置 QML import path。

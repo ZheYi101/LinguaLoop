@@ -6,6 +6,7 @@
 
 - [Project Brief](./product/PROJECT_BRIEF.md): 项目愿景、目标用户、产品原则和非目标。
 - [MVP Spec](./product/MVP_SPEC.md): 第一版 MVP 范围、用户故事、初始数据对象和验收标准。
+- [UI Surface Plan](./product/UI_SURFACE_PLAN.md): 桌面端与 Android 端页面、导航和 CLI 功能映射。
 
 ## Research
 
@@ -27,6 +28,7 @@
 ## Decisions
 
 - [Technical Decisions](./decisions/TECH_DECISIONS.md): 会影响长期维护的技术决策记录。
+- [QML Runtime](./desktop/QML_RUNTIME.md): PySide6、Kirigami QML module 和平台运行要求。
 
 ## Root Documents
 

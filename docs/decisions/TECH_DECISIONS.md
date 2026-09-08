@@ -188,6 +188,84 @@ LinguaLoop 的 MVP 和后续架构采用以下学习闭环作为产品约束：
 - Cepeda et al. 2006, distributed practice: https://doi.org/10.1037/0033-2909.132.3.354
 - Wood 2006, formulaic language in L2 speech: https://eric.ed.gov/?id=EJ750535
 
+## Decision 0006: 先做 CLI POC，再做 Python-native 桌面壳
+
+- Status: Accepted
+- Date: 2026-09-07
+
+### 背景
+
+当前核心闭环已经能在测试中跑通，但还没有稳定的用户壳。为了尽快验证真实材料导入、分析、对话、纠错、复盘和导出这条链路，先需要一个最小可运行的命令行原型。
+
+### 决策
+
+- 先实现无 UI CLI POC，作为第一条可操作入口。
+- CLI 通过共享的 application service 调用 kernel / provider，不直接绑定 LangGraph 或具体 LLM SDK。
+- 下一阶段桌面端优先采用 Python-native 壳，复用同一套 application service；WebUI 不作为主线。
+
+### 影响
+
+- CLI 可以直接用于本地 smoke test 和功能验收。
+- 桌面端与 CLI 共用同一业务服务层，后续更容易替换交互外壳。
+- WebUI 仍可保留为未来可选项，但不会先成为主交互。
+
+## Decision 0007: 桌面端采用 PyQt6 + PyQt-SiliconUI POC（Superseded）
+
+- Status: Accepted
+- Date: 2026-09-08
+
+### 背景
+
+项目已经有可运行的 CLI POC 和共享 application service。下一步需要验证本地桌面端交互壳，并且用户偏好 PyQt-SiliconUI 的视觉风格。已检查 `feature/pyqt6-migration` 分支：该分支描述中提到 PySide6，但实际依赖和源码 import 均以 PyQt6 为主，因此当前不能按 PySide6/QML 直接使用。
+
+### 决策
+
+- 桌面端 POC 改为 `PyQt6 + PyQt-SiliconUI`。
+- `PyQt-SiliconUI` 通过 Git 依赖接入 `feature/pyqt6-migration` 分支，不 vendor 第三方源码，也不使用 submodule。
+- 桌面端先作为薄 UI 壳复用 `LearningWorkbench`，不直接依赖 LangGraph、ChatOpenAI 或 provider 内部。
+- 默认使用真实 OpenAI-compatible provider，通过 `OPENAI_*` 环境变量配置；mock provider 仅通过显式参数用于离线调试。
+
+### 影响
+
+- 项目会受到 PyQt-SiliconUI GPLv3 许可证影响；如果未来希望改用 MIT、Apache-2.0 或闭源分发，需要重新评估 UI 依赖或移除该组件库。
+- Git 分支依赖的稳定性弱于正式发布包；后续需要关注上游迁移进度，并在需要时固定 commit 或替换组件库。
+- 第一版桌面端使用中文浅色界面，只验证窗口启动和最小学习闭环，不承诺完整 UI 体验、持久化或真实 API 异步调用体验。
+
+## Decision 0008: 统一采用 PySide6/QML + Qt Quick Controls 6 + Kirigami
+
+- Status: Accepted
+- Date: 2026-09-08
+- Supersedes: Decision 0007
+
+### 背景
+
+LinguaLoop 后续需要同时覆盖桌面端和移动端。语言学习在手机上不是桌面三栏布局的简单缩小，而是材料、练习、输出、反馈、复盘的连续任务流。QML 更适合快速调整响应式布局和触控交互，Kirigami 针对桌面与移动设备的 convergent application 场景设计。
+
+### 决策
+
+- UI 主线采用 `PySide6 + QML + Qt Quick Controls 6 + KDE Kirigami`。
+- Kirigami 作为桌面端和 Android 端的应用壳，核心页面共享 QML 实现。
+- QML 只调用 Python `QObject` ViewModel 的 properties、signals 和 slots；不直接调用 LangGraph、ChatOpenAI、provider 或 Pydantic 内部对象。
+- `LearningWorkbench` 继续作为应用层边界，Core、Kernel 和 Provider 保持 Python-first 且与 UI 框架无关。
+- LLM 操作放入 Python worker/thread，界面只处理 loading、结果和错误；请求失败时保留用户当前输入。
+- Android 优先进行移动端运行验证，iOS 暂不作为第一阶段目标。
+- Decision 0007 的 PyQt6 与 PyQt-SiliconUI 路线不再作为主线，相关依赖移除。
+
+### 影响
+
+- PySide6 通过 Python 依赖安装；Kirigami 是 Qt QML runtime，不把 PyPI 上同名的 `kirigami` 包视为 KDE Kirigami 依赖。
+- Windows、Linux 和 Android 需要分别验证 QML module 发现、运行时分发和打包方式。
+- Windows 开发期不得把 Craft 编译的 Kirigami native plugin 直接注入 PyPI PySide6 的 Qt 进程。检测到这种组合时，应用自动使用 Qt Quick Controls fallback；正式 Kirigami Windows 分发必须使用同源的 Qt、PySide6 和 Kirigami runtime，并在独立打包 spike 中验证。
+- Kirigami/Qt 依赖的 LGPL/GPL 组合、图标资源和平台打包方式需要在发布前单独审查。
+- 首版页面采用材料、练习、复盘导航；移动端优先保持单列、可返回、可滚动和适合触控的交互。
+
+### 参考
+
+- Qt Quick Controls: https://doc.qt.io/qt-6/qtquickcontrols-index.html
+- Kirigami Getting Started: https://develop.kde.org/docs/getting-started/kirigami/
+- Kirigami Python Setup: https://develop.kde.org/docs/getting-started/kirigami/setup-python/
+- Kirigami Windows Setup: https://develop.kde.org/docs/getting-started/kirigami/platforms-windows/
+
 ## 技术栈候选
 
 ### Python-first Agent Core

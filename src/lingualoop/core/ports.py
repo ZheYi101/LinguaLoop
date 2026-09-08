@@ -3,6 +3,7 @@ from typing import Protocol
 from lingualoop.core.domain import (
     FeedbackItem,
     LanguageEnum,
+    MaterialAnalysis,
     LearningMaterial,
     Message,
     PracticeInstruction,
@@ -16,6 +17,14 @@ class LearningLLMProvider(Protocol):
     """defining basic protocol of LLM
     protocol is similar to interface in Typescript and Java
     need to be implemented by other classes"""
+
+    async def analyze_material(
+        self,
+        *,
+        material: LearningMaterial,
+        target_language: LanguageEnum,
+        native_language: LanguageEnum,
+    ) -> MaterialAnalysis: ...
 
     async def generate_task(
         self,

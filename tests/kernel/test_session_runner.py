@@ -4,6 +4,7 @@ from lingualoop.core import (
     FeedbackItem,
     LanguageEnum,
     LearningMaterial,
+    MaterialAnalysis,
     Message,
     PracticeInstruction,
     ProficiencyLevel,
@@ -15,6 +16,21 @@ from lingualoop.kernel import DirectLearningSessionRunner, InMemoryEventStore
 
 
 class FakeLearningLLMProvider:
+    async def analyze_material(
+        self,
+        *,
+        material: LearningMaterial,
+        target_language: LanguageEnum,
+        native_language: LanguageEnum,
+    ) -> MaterialAnalysis:
+        return MaterialAnalysis(
+            summary="Mock summary.",
+            keywords=[],
+            expressions=[],
+            difficulties=[],
+            suggested_goals=[],
+        )
+
     async def generate_task(
         self,
         *,

@@ -11,13 +11,18 @@
 ```text
 apps
   web app
-  future desktop / mobile surfaces
+  desktop / Android QML surfaces
 
 client
   UI components
   conversation view
   material editor
   review dashboard
+
+QML UI
+  Python QObject ViewModel
+    LearningWorkbench
+      Kernel / Provider
 
 application
   material analysis use cases
@@ -129,6 +134,12 @@ LinguaLoop 不应把“内容展示过”当成“学习者掌握了”。学习
 - 每个 LLM 任务应有明确输入、输出 schema 和失败策略。
 - 对话消息、纠错项和复盘项应能关联回原始材料或会话片段。
 - PydanticAI 可作为第一批 typed LLM call adapter，但不要让业务层直接依赖 PydanticAI agent 对象。
+
+## QML UI 边界
+
+桌面端和 Android 端使用 PySide6 加载 QML。Qt Quick Controls 6 提供基础控件，Kirigami 提供 ApplicationWindow、Page、导航和响应式布局。QML 不接触领域模型、LangGraph 或具体 provider；Python ViewModel 将领域对象转换为稳定的字符串、列表和状态属性。
+
+材料、练习和复盘是独立页面。桌面端可以使用更宽的上下文区域，移动端使用单列 PageStack/滚动布局。网络操作必须在 Python worker/thread 中执行，ViewModel 通过 busy/error/result signals 更新 QML。
 
 ## 语音与实时对话
 

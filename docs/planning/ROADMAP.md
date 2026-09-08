@@ -4,16 +4,18 @@
 
 - [x] 初始化基础文档
 - [ ] 确定开源许可证
-- [ ] 确定第一版技术栈
+- [x] 确定第一版技术栈
 - [ ] 确定 MVP 的首个目标语言和示例材料
 - [ ] 定义插件 manifest、capability registry 和权限模型 v0
 - [ ] 定义 Pattern manifest、capability requirements 和第一批学习 Pattern 清单
 - [x] 确认 Python-first Agent Kernel 方案并将 Decision 0004 升级为 Accepted
 - [x] 沉淀真实输入学习闭环的理论依据和 EnglishLearningWorkflow 实践经验
+- [x] 实现无 UI CLI POC，打通材料加载、分析、练习、复盘和导出
 
 ## Phase 1: 可运行 MVP
 
-- [ ] 创建应用脚手架
+- [x] 创建应用脚手架
+- [x] 建立 PySide6/QML 桌面端和 Android 适配方向
 - [ ] 实现 Python core Pydantic models 和 session event schema
 - [ ] 实现 material lifecycle：raw source、lesson-ready text、segment metadata
 - [ ] 实现 Agent Kernel 的 direct deterministic runner
@@ -26,7 +28,7 @@
 - [ ] 实现 capability requirement check
 - [ ] 实现内置 input-derived 文本学习 Pattern
 - [ ] 实现 LangGraph AgentEngine adapter
-- [ ] 增加 LLM provider mock 和基础测试
+- [x] 增加 LLM provider mock 和基础测试
 
 ## Phase 2: 学习闭环增强
 
