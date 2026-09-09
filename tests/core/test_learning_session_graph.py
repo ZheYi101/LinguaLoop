@@ -9,6 +9,7 @@ from lingualoop.core import (
     PracticeInstruction,
     ProficiencyLevel,
     ReviewItem,
+    SessionReview,
     MessageRole,
 )
 from lingualoop.engine.langgraph import build_learning_session_graph
@@ -74,6 +75,15 @@ class FakeLearningLLMProvider:
         material: LearningMaterial,
     ) -> list[ReviewItem]:
         return [ReviewItem(prompt="Yesterday I ___ to the market.", answer="went")]
+
+    async def summarize_session(
+        self,
+        *,
+        session,
+        material: LearningMaterial,
+        target_language: LanguageEnum,
+    ) -> SessionReview:
+        return SessionReview(summary="Summary", review_items=[])
 
 
 def test_langgraph_learning_session_smoke() -> None:

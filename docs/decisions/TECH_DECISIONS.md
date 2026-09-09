@@ -314,3 +314,37 @@ LinguaLoop 后续需要同时覆盖桌面端和移动端。语言学习在手机
 - 插件 manifest 格式、权限模型、版本兼容策略。
 - Pattern manifest 格式、capability requirements、fallback 策略。
 - 第一批官方学习 Pattern 清单。
+
+## Decision 0009: 本地 SQLite 持久化和主动结束复盘进入 MVP
+
+- Status: Accepted
+- Date: 2026-09-09
+
+### 背景
+
+桌面端 POC 已经能通过内存态完成材料分析、练习对话和导出，但用户关闭或重启软件后无法继续看到材料、会话和复习项。当前产品目标强调真实材料、用户输出证据、反馈来源和 review queue 的连续性，因此内存态无法支撑 MVP 验收。
+
+同时，外部产品调研显示，材料导入、AI 解释和卡片生成已经是常见基线。LinguaLoop 的差异应落在可追溯学习证据链，而不是只做更多格式的导入或泛用聊天。
+
+### 决策
+
+- MVP 运行时持久化采用本地 SQLite，使用标准库 `sqlite3`，暂不引入 ORM。
+- 默认数据库路径为平台应用数据目录下的 `LinguaLoop/lingualoop.sqlite3`，允许用 `LINGUALOOP_DATA_DIR` 覆盖。
+- 存储材料、会话、消息、反馈、复盘、review items、review outcomes 和 `SessionEvent`。
+- Markdown 和 DOCX 是第一批文件导入格式；旧式 `.doc`、PDF、视频和 Google Docs 在线授权暂不进入第一阶段。
+- 多轮练习过程中只生成即时反馈；最终 review candidates 在用户点击“结束并复盘”后集中生成。
+- 桌面端采用左导航、中工作区、右上下文的工作台布局，并在窄屏下折叠。
+
+### 影响
+
+- `LearningWorkbench` 成为本地恢复、材料列表、会话完成和 review queue 的应用层边界。
+- Provider contract 增加 `summarize_session`，用于输出结构化 `SessionReview`。
+- `ReviewItem` 需要保存来源材料、来源会话、状态和 `due_at`，`ReviewOutcome` 记录 `again/hard/good/easy`，控制事件覆盖 pause、ignore、archive、delete 和 mastered。
+- JSON 导出继续作为备份和迁移出口，但不承担运行时状态。
+- Mock provider 继续用于 CLI、测试和显式离线调试；普通桌面模式不自动降级到 mock。
+
+### 未解决问题
+
+- SQLite 当前使用 JSON payload table，后续需要评估何时拆成更细粒度 repository schema。
+- `LearningSegment` 已进入 Core，但 segment 自动切分和来源位置标注还需要继续补强。
+- 基础 due date 调度已经可用，但完整 spaced repetition 算法仍留到后续阶段。

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
@@ -65,6 +65,16 @@ class MaterialSourceType(StrEnum):
     OTHER = "other"
 
 
+class MaterialTrack(StrEnum):
+    LIVE_CHAT = "live_chat"
+    ARTICLE_READING = "article_reading"
+
+
+class NormalizationStatus(StrEnum):
+    RAW = "raw"
+    NORMALIZED = "normalized"
+
+
 class SessionStatus(StrEnum):
     ACTIVE = "active"
     COMPLETED = "completed"
@@ -92,6 +102,22 @@ class ReviewItemKind(StrEnum):
     EXPRESSION = "expression"
 
 
+class ReviewStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    IGNORED = "ignored"
+    ARCHIVED = "archived"
+    DELETED = "deleted"
+    MASTERED = "mastered"
+
+
+class ReviewRating(StrEnum):
+    AGAIN = "again"
+    HARD = "hard"
+    GOOD = "good"
+    EASY = "easy"
+
+
 class SessionEventType(StrEnum):
     SESSION_STARTED = "session.started"
     USER_MESSAGE_ADDED = "message.user_added"
@@ -99,6 +125,11 @@ class SessionEventType(StrEnum):
     FEEDBACK_CREATED = "feedback.created"
     REVIEW_ITEMS_CREATED = "review_items.created"
     SESSION_COMPLETED = "session.completed"
+    REVIEW_OUTCOME_RECORDED = "review.outcome_recorded"
+    REVIEW_PAUSED = "review.paused"
+    REVIEW_IGNORED = "review.ignored"
+    REVIEW_ARCHIVED = "review.archived"
+    REVIEW_DELETED = "review.deleted"
 
 
 class LanguageEnum(StrEnum):
@@ -154,8 +185,14 @@ class LearningMaterial(DomainModel):
     source_language: LanguageEnum
     content: str
     source_type: MaterialSourceType = MaterialSourceType.TEXT
+    raw_content: str | None = None
+    normalized_content: str | None = None
+    track: MaterialTrack = MaterialTrack.ARTICLE_READING
+    source_path: str | None = None
+    normalization_status: NormalizationStatus = NormalizationStatus.RAW
     analysis: MaterialAnalysis | None = None
     created_at: datetime = Field(default_factory=utc_now)
+    imported_at: datetime = Field(default_factory=utc_now)
 
     @field_validator("title", "content", "source_language")
     @classmethod
@@ -163,6 +200,16 @@ class LearningMaterial(DomainModel):
         cls, value: str | LanguageEnum
     ) -> str | LanguageEnum:
         return _clean_required_text(value)
+
+
+class LearningSegment(DomainModel):
+    id: str = Field(default_factory=lambda: new_id("segment"))
+    material_id: str
+    content: str
+    start_ref: int | None = None
+    end_ref: int | None = None
+    context_summary: str | None = None
+    practice_goal: str | None = None
 
 
 class PracticeInstruction(DomainModel):
@@ -219,8 +266,30 @@ class ReviewItem(DomainModel):
     answer: str
     source_feedback_id: str | None = None
     source_session_id: str | None = None
-    due_at: datetime | None = None
+    source_material_id: str | None = None
+    source_segment_id: str | None = None
+    source_message_id: str | None = None
+    context: str | None = None
+    status: ReviewStatus = ReviewStatus.ACTIVE
+    due_at: datetime | None = Field(default_factory=lambda: utc_now() + timedelta(days=1))
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class ReviewOutcome(DomainModel):
+    id: str = Field(default_factory=lambda: new_id("review_outcome"))
+    review_item_id: str
+    rating: ReviewRating
+    answer: str | None = None
+    occurred_at: datetime = Field(default_factory=utc_now)
+    next_due_at: datetime | None = None
+
+
+class SessionReview(DomainModel):
+    summary: str
+    focus_areas: list[str] = Field(default_factory=list)
+    feedback_items: list[FeedbackItem] = Field(default_factory=list)
+    review_items: list[ReviewItem] = Field(default_factory=list)
+    next_action: str | None = None
 
 
 class PracticeSession(DomainModel):
@@ -233,8 +302,10 @@ class PracticeSession(DomainModel):
     messages: list[Message] = Field(default_factory=list)
     feedback_items: list[FeedbackItem] = Field(default_factory=list)
     review_items: list[ReviewItem] = Field(default_factory=list)
+    review: SessionReview | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+    completed_at: datetime | None = None
 
     @property
     def current_instruction(self) -> PracticeInstruction | None:

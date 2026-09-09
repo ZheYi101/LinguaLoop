@@ -9,6 +9,8 @@ from lingualoop.core.domain import (
     PracticeInstruction,
     ProficiencyLevel,
     ReviewItem,
+    SessionReview,
+    PracticeSession,
     SessionEvent,
 )
 
@@ -59,6 +61,14 @@ class LearningLLMProvider(Protocol):
         corrections: list[FeedbackItem],
         material: LearningMaterial,
     ) -> list[ReviewItem]: ...
+
+    async def summarize_session(
+        self,
+        *,
+        session: PracticeSession,
+        material: LearningMaterial,
+        target_language: LanguageEnum,
+    ) -> SessionReview: ...
 
 
 class EventStore(Protocol):

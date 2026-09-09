@@ -22,6 +22,8 @@ from lingualoop.core.domain import (
     ProficiencyLevel,
     ReviewItem,
     ReviewItemKind,
+    PracticeSession,
+    SessionReview,
 )
 from lingualoop.core.ports import LearningLLMProvider
 
@@ -221,6 +223,36 @@ class OpenAICompatibleLLMProvider(LearningLLMProvider):
         content = await self._invoke_text(self._reasoning_client, messages)
         return _parse_review_items(content)
 
+    async def summarize_session(
+        self,
+        *,
+        session: PracticeSession,
+        material: LearningMaterial,
+        target_language: LanguageEnum,
+    ) -> SessionReview:
+        messages = [
+            SystemMessage(
+                content=(
+                    "Return only a JSON object with fields summary, focus_areas, "
+                    "feedback_items, review_items, and next_action. "
+                    "feedback_items must contain error_type, original, corrected, "
+                    "explanation. review_items must contain prompt, answer, kind. "
+                    "Create no more than three review_items. Keep feedback pattern-level."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"Target language: {target_language.value}\n"
+                    f"Material title: {material.title}\n"
+                    f"Material:\n{material.content}\n"
+                    f"Conversation:\n{_messages_to_text(session.messages)}\n"
+                    f"Existing feedback:\n{_feedback_to_text(session.feedback_items)}"
+                )
+            ),
+        ]
+        content = await self._invoke_text(self._reasoning_client, messages)
+        return _parse_session_review(content)
+
     async def _invoke_text(
         self, client: BaseChatModel, messages: list[BaseMessage]
     ) -> str:
@@ -416,6 +448,30 @@ def _parse_review_items(content: str) -> list[ReviewItem]:
                 )
             )
     return items
+
+
+def _parse_session_review(content: str) -> SessionReview:
+    try:
+        payload = _load_json_response(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"LLM returned non-JSON session review content: {content[:500]}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("session review response must be a JSON object")
+    feedback_payload = json.dumps(payload.get("feedback_items", []), ensure_ascii=False)
+    review_payload = json.dumps(payload.get("review_items", []), ensure_ascii=False)
+    feedback = _parse_feedback_items(feedback_payload)
+    review_items = _parse_review_items(review_payload)[:3]
+    return SessionReview(
+        summary=str(payload.get("summary", "")).strip() or "Session completed.",
+        focus_areas=[
+            str(item).strip()
+            for item in payload.get("focus_areas", [])
+            if str(item).strip()
+        ],
+        feedback_items=feedback,
+        review_items=review_items,
+        next_action=str(payload.get("next_action", "")).strip() or None,
+    )
 
 
 def _review_item_kind(value: Any) -> ReviewItemKind:

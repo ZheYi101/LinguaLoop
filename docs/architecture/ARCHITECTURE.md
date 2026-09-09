@@ -163,11 +163,19 @@ LiveKit 是 `voice-livekit` 插件的强候选 SDK，而不是项目总基座。
 - 若后续支持云同步，需要明确数据保留、删除和导出机制。
 - 本地开发应使用 `.env.example` 描述环境变量，不提交 `.env`。
 
+## 当前本地持久化
+
+MVP 运行时持久化采用标准库 `sqlite3`，不引入 ORM。SQLite adapter 保存材料、会话、review queue 和 `SessionEvent` 的 JSON payload，Core 仍只依赖 `EventStore` 等协议，不感知数据库实现。
+
+默认数据库路径为平台应用数据目录下的 `LinguaLoop/lingualoop.sqlite3`，可通过 `LINGUALOOP_DATA_DIR` 覆盖。JSON 导出保留为迁移和备份能力，不作为主运行时存储。
+
+当前导入器支持 `.md`、`.markdown` 和 `.docx`。导入流程保留 raw content，同时生成 lesson-ready normalized copy；Google Docs 在线授权、旧式 `.doc`、PDF 和视频导入不进入第一阶段关键路径。
+
 ## 待定架构问题
 
 - 前端是否采用 Next.js、Vite SPA，还是其他形态。
 - 后端是否采用同构应用 API routes、独立 API 服务，还是 BaaS。
-- 持久化是否先用 SQLite/Postgres，还是本地文件/浏览器存储。
+- SQLite payload store 何时升级为更细粒度查询 schema 或 repository 层。
 - 是否从第一版就支持多 LLM provider。
 - 插件 manifest、权限模型和版本兼容策略如何设计。
 - Pattern manifest、capability requirements 和 fallback 策略如何设计。

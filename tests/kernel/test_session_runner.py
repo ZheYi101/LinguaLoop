@@ -9,7 +9,9 @@ from lingualoop.core import (
     PracticeInstruction,
     ProficiencyLevel,
     ReviewItem,
+    SessionReview,
     SessionEventType,
+    SessionStatus,
     SessionUserProfile,
 )
 from lingualoop.kernel import DirectLearningSessionRunner, InMemoryEventStore
@@ -82,6 +84,27 @@ class FakeLearningLLMProvider:
             )
         ]
 
+    async def summarize_session(
+        self,
+        *,
+        session,
+        material: LearningMaterial,
+        target_language: LanguageEnum,
+    ) -> SessionReview:
+        return SessionReview(
+            summary="Past tense needs attention.",
+            focus_areas=["simple past tense"],
+            feedback_items=session.feedback_items,
+            review_items=[
+                ReviewItem(
+                    prompt="Yesterday I ___ to the market.",
+                    answer="went",
+                    source_feedback_id=session.feedback_items[0].id,
+                )
+            ],
+            next_action="Review this later without looking at the answer.",
+        )
+
 
 def test_direct_runner_starts_session_with_plan_and_events() -> None:
     async def run_case() -> None:
@@ -107,7 +130,7 @@ def test_direct_runner_starts_session_with_plan_and_events() -> None:
     asyncio.run(run_case())
 
 
-def test_direct_runner_handles_user_message_with_feedback_and_review_items() -> None:
+def test_direct_runner_handles_user_message_without_final_review_items() -> None:
     async def run_case() -> None:
         material = _material()
         store = InMemoryEventStore()
@@ -128,14 +151,41 @@ def test_direct_runner_handles_user_message_with_feedback_and_review_items() -> 
         assert result.assistant_message is not None
         assert result.assistant_message.content == "Good start. Use past tense here."
         assert result.feedback_items[0].source_message_id == user_message.id
-        assert result.review_items[0].source_session_id == started.session.id
+        assert result.review_items == []
+        assert result.session.review_items == []
         assert [event.event_type for event in result.events] == [
             SessionEventType.USER_MESSAGE_ADDED,
             SessionEventType.ASSISTANT_MESSAGE_ADDED,
             SessionEventType.FEEDBACK_CREATED,
-            SessionEventType.REVIEW_ITEMS_CREATED,
         ]
-        assert len(await store.list_session_events(started.session.id)) == 6
+        assert len(await store.list_session_events(started.session.id)) == 5
+
+    asyncio.run(run_case())
+
+
+def test_direct_runner_completes_session_with_review_items() -> None:
+    async def run_case() -> None:
+        material = _material()
+        store = InMemoryEventStore()
+        runner = DirectLearningSessionRunner(FakeLearningLLMProvider(), store)
+        started = await runner.start_session(material=material, profile=_profile())
+        answered = await runner.handle_user_message(
+            session=started.session,
+            material=material,
+            user_content="Yesterday I go to market.",
+        )
+
+        result = await runner.complete_session(session=answered.session, material=material)
+
+        assert result.session.status is SessionStatus.COMPLETED
+        assert result.session.completed_at is not None
+        assert result.session.review is not None
+        assert result.review_items[0].source_session_id == result.session.id
+        assert result.review_items[0].source_material_id == material.id
+        assert [event.event_type for event in result.events] == [
+            SessionEventType.REVIEW_ITEMS_CREATED,
+            SessionEventType.SESSION_COMPLETED,
+        ]
 
     asyncio.run(run_case())
 

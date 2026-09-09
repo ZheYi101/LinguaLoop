@@ -15,6 +15,7 @@ from lingualoop.core.domain import (
     ProficiencyLevel,
     ReviewItem,
     ReviewItemKind,
+    SessionReview,
 )
 from lingualoop.core.ports import LearningLLMProvider
 
@@ -152,6 +153,30 @@ class MockLearningLLMProvider(LearningLLMProvider):
                 answer=material.analysis.summary if material.analysis else material.content,
             )
         ]
+
+    async def summarize_session(
+        self,
+        *,
+        session,
+        material: LearningMaterial,
+        target_language: LanguageEnum,
+    ) -> SessionReview:
+        review_items = await self.create_review_items(
+            corrections=session.feedback_items[-3:],
+            material=material,
+        )
+        return SessionReview(
+            summary=(
+                f"You completed {len([m for m in session.messages if m.role.value == 'user'])} "
+                f"learner response(s) around {material.title}."
+            ),
+            focus_areas=[
+                item.explanation for item in session.feedback_items[:3]
+            ],
+            feedback_items=session.feedback_items[-5:],
+            review_items=review_items[:3],
+            next_action="Return later and produce the review answers without looking at the answer first.",
+        )
 
 
 def _tokenize(text: str) -> list[str]:

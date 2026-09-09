@@ -4,7 +4,7 @@ LinguaLoop 是一个开源的对话式语言学习平台。项目目标是把「
 
 ## 当前状态
 
-项目处于初始化阶段。本仓库目前包含基础文档、Python core 的早期脚手架、CLI POC，以及一个最小桌面端 POC，用于沉淀产品边界、MVP 范围、架构方向和协作规范。
+项目处于早期 MVP 阶段。本仓库目前包含基础文档、Python core、CLI POC，以及 PySide6/QML 桌面端工作台。当前闭环已支持本地 SQLite 持久化、Markdown/DOCX 材料导入、多轮材料对话、用户主动结束复盘、review queue 和基础复习结果记录。
 
 ## 产品方向
 
@@ -34,22 +34,28 @@ LinguaLoop 面向已经有一定输入材料的学习者，例如视频字幕、
 
 ## 本地验证
 
-安装开发依赖后，可以运行当前 core 测试：
+安装开发依赖后，可以运行当前测试：
 
 ```bash
 python -m pytest
 ```
 
+使用 `uv` 时推荐：
+
+```powershell
+uv sync --dev --extra desktop
+.venv\Scripts\python.exe -m pytest -q
+```
+
 ## 下一步
 
-建议先完成以下决策，再创建应用脚手架：
+建议优先打磨以下能力：
 
-1. 选择第一版前端形态：Web app、桌面 app，或移动优先 PWA
-2. 确认 Python-first Agent Kernel 方案，并决定何时接入 LangGraph adapter
-3. 选择第一版后端形态：FastAPI 服务、本地优先应用，或其他 Python API surface
-4. 明确第一版 LLM 接入策略：PydanticAI adapter、兼容 OpenAI 的 provider，或轻量自写 adapter
-5. 定义插件 manifest、Pattern contract、capability requirements 和权限模型
-6. 确定开源许可证
+1. 将当前 direct runner 抽成正式内置 Pattern。
+2. 完善材料 segment metadata 和 review source linking。
+3. 增加更完整的复习页交互和 review outcome 历史展示。
+4. 补齐插件 manifest、Pattern contract、capability requirements 和权限模型。
+5. 确定开源许可证。
 
 ## 真实 AI 冒烟测试
 
@@ -91,12 +97,15 @@ lingualoop --mock
 常用命令：
 
 - `load`：加载并分析材料
+- `import`：导入 `.md`、`.markdown` 或 `.docx` 材料
 - `start`：开始一次练习会话
 - `say`：发送用户回答
+- `finish`：结束本轮并生成结构化复盘和 review items
 - `review`：查看复习项
+- `rate`：记录 `again`、`hard`、`good` 或 `easy` 复习结果
 - `summary`：查看当前会话摘要
 - `export`：导出会话 JSON
-- `reset`：清空当前状态
+- `reset`：清空当前选择状态，不删除本地持久化数据
 - `quit`：退出
 
 默认模式会读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_REASONING_MODEL` 和 `OPENAI_DIALOGUE_MODEL`。离线调试可用 `--mock`。
@@ -109,7 +118,7 @@ lingualoop --mock
 uv sync --extra desktop
 ```
 
-启动最小桌面壳。桌面端默认使用真实 OpenAI-compatible provider，并读取当前工作目录 `.env` 或系统环境变量中的 `OPENAI_*` 配置：
+启动桌面工作台。桌面端默认使用真实 OpenAI-compatible provider，并读取当前工作目录 `.env` 或系统环境变量中的 `OPENAI_*` 配置：
 
 ```powershell
 uv run lingualoop-desktop
@@ -121,6 +130,6 @@ uv run lingualoop-desktop
 uv run lingualoop-desktop --mock
 ```
 
-桌面端默认中文界面。当前桌面端是共享桌面/Android 页面和最小学习闭环的 POC，不代表最终 UI 或完整客户端功能。Kirigami runtime 的平台要求见 [docs/desktop/QML_RUNTIME.md](./docs/desktop/QML_RUNTIME.md)。
+桌面端默认中文界面，采用左导航、中工作区、右上下文的三栏布局；窄屏会折叠为单列导航。默认本地数据保存在平台应用数据目录下的 `LinguaLoop/lingualoop.sqlite3`，也可通过 `LINGUALOOP_DATA_DIR` 覆盖。Kirigami runtime 的平台要求见 [docs/desktop/QML_RUNTIME.md](./docs/desktop/QML_RUNTIME.md)。
 
 Windows 用户可按 [QML runtime 文档](./docs/desktop/QML_RUNTIME.md) 安装 KDE Craft 和 Kirigami。仓库提供 `scripts/setup_kirigami_windows.ps1` 自动发现 Craft runtime 并配置 QML import path。

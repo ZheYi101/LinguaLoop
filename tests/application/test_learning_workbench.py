@@ -5,13 +5,18 @@ import json
 
 from lingualoop.application import LearningWorkbench
 from lingualoop.cli import ConsoleSessionApp
-from lingualoop.core import LanguageEnum, ProficiencyLevel
+from lingualoop.core import LanguageEnum, ProficiencyLevel, ReviewRating, ReviewStatus
+from lingualoop.infrastructure import SQLiteStore
 from lingualoop.providers import MockLearningLLMProvider
 
 
 def test_workbench_load_start_send_and_export(tmp_path) -> None:
     async def run_case() -> None:
-        workbench = LearningWorkbench(MockLearningLLMProvider())
+        db_path = tmp_path / "lingualoop.sqlite3"
+        workbench = LearningWorkbench(
+            MockLearningLLMProvider(),
+            event_store=SQLiteStore(db_path),
+        )
 
         material = await workbench.load_material(
             title="Market trip",
@@ -34,7 +39,30 @@ def test_workbench_load_start_send_and_export(tmp_path) -> None:
         answered = await workbench.send_message("Yesterday I go market and buy apple.")
         assert answered.assistant_message is not None
         assert answered.feedback_items
-        assert answered.review_items
+        assert answered.review_items == []
+        assert workbench.review_queue == []
+
+        completed = await workbench.complete_session()
+        assert completed.session.review is not None
+        assert completed.review_items
+        assert workbench.review_queue
+
+        restored = LearningWorkbench(
+            MockLearningLLMProvider(),
+            event_store=SQLiteStore(db_path),
+        )
+        assert restored.materials[0].title == "Market trip"
+        assert restored.session is not None
+        assert restored.session.review is not None
+        assert restored.review_queue[0].prompt == completed.review_items[0].prompt
+
+        outcome = await restored.record_review_outcome(
+            restored.review_queue[0].id,
+            ReviewRating.HARD,
+            "went",
+        )
+        assert outcome.next_due_at is not None
+        assert restored.review_queue[0].status is ReviewStatus.ACTIVE
 
         exported = await workbench.export_json(tmp_path / "session.json")
         payload = json.loads(exported.read_text(encoding="utf-8"))
@@ -42,6 +70,10 @@ def test_workbench_load_start_send_and_export(tmp_path) -> None:
         assert payload["material"]["analysis"]["summary"]
         assert payload["session"]["messages"]
         assert payload["events"]
+        assert payload["review_queue"]
+
+        await restored.update_review_status(restored.review_queue[0].id, ReviewStatus.IGNORED)
+        assert restored.review_queue == []
 
     asyncio.run(run_case())
 
@@ -67,7 +99,10 @@ def test_cli_command_flow(tmp_path) -> None:
             return next(responses)
 
         app = ConsoleSessionApp(
-            LearningWorkbench(MockLearningLLMProvider()),
+            LearningWorkbench(
+                MockLearningLLMProvider(),
+                event_store=SQLiteStore(tmp_path / "cli.sqlite3"),
+            ),
             input_fn=fake_input,
             output_fn=outputs.append,
         )
@@ -81,7 +116,10 @@ def test_cli_command_flow(tmp_path) -> None:
         say = await app.handle_line("say")
         assert any(line.startswith("Assistant:") for line in say.lines)
         assert any(line.startswith("Feedback items:") for line in say.lines)
-        assert any(line.startswith("Review items:") for line in say.lines)
+
+        finish = await app.handle_line("finish")
+        assert any(line.startswith("Session completed.") for line in finish.lines)
+        assert any(line.startswith("Review items:") for line in finish.lines)
 
         review = await app.handle_line("review")
         assert review.lines[0].startswith("Review items")

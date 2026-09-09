@@ -15,6 +15,7 @@ from lingualoop.core.domain import (
     SessionEvent,
     SessionEventType,
     SessionUserProfile,
+    SessionStatus,
     utc_now,
 )
 from lingualoop.core.ports import EventStore, LearningLLMProvider
@@ -123,24 +124,12 @@ class DirectLearningSessionRunner:
             target_language=session.profile.target_language,
         )
 
-        review_items = await self._llm_provider.create_review_items(
-            corrections=corrections, material=material
-        )
-        review_items = [
-            (
-                item
-                if item.source_session_id is not None
-                else item.model_copy(update={"source_session_id": session.id})
-            )
-            for item in review_items
-        ]
         assistant_message = Message(role=MessageRole.ASSISTANT, content=assistant_text)
 
         updated_session = session.model_copy(
             update={
                 "messages": [*session.messages, user_message, assistant_message],
                 "feedback_items": [*session.feedback_items, *corrections],
-                "review_items": [*session.review_items, *review_items],
                 "updated_at": utc_now(),
             }
         )
@@ -161,17 +150,6 @@ class DirectLearningSessionRunner:
                 )
             )
 
-        if review_items:
-            events.append(
-                SessionEvent(
-                    session_id=updated_session.id,
-                    event_type=SessionEventType.REVIEW_ITEMS_CREATED,
-                    payload={
-                        "review_item_ids": [item.id for item in review_items],
-                    },
-                )
-            )
-
         await self._event_store.append_many(events)
 
         return SessionStepResult(
@@ -179,6 +157,67 @@ class DirectLearningSessionRunner:
             events=events,
             assistant_message=assistant_message,
             feedback_items=corrections,
+        )
+
+    async def complete_session(
+        self,
+        *,
+        session: PracticeSession,
+        material: LearningMaterial,
+    ) -> SessionStepResult:
+        if session.status is SessionStatus.COMPLETED:
+            return SessionStepResult(session=session, review_items=session.review_items)
+
+        review = await self._llm_provider.summarize_session(
+            session=session,
+            material=material,
+            target_language=session.profile.target_language,
+        )
+        review_items = [
+            item.model_copy(
+                update={
+                    "source_session_id": item.source_session_id or session.id,
+                    "source_material_id": item.source_material_id or material.id,
+                }
+            )
+            for item in review.review_items
+        ]
+        review = review.model_copy(
+            update={
+                "feedback_items": [
+                    *session.feedback_items,
+                    *review.feedback_items,
+                ],
+                "review_items": review_items,
+            }
+        )
+        completed = session.model_copy(
+            update={
+                "status": SessionStatus.COMPLETED,
+                "review": review,
+                "review_items": review_items,
+                "feedback_items": review.feedback_items,
+                "updated_at": utc_now(),
+                "completed_at": utc_now(),
+            }
+        )
+        events = [
+            SessionEvent(
+                session_id=completed.id,
+                event_type=SessionEventType.REVIEW_ITEMS_CREATED,
+                payload={"review_item_ids": [item.id for item in review_items]},
+            ),
+            SessionEvent(
+                session_id=completed.id,
+                event_type=SessionEventType.SESSION_COMPLETED,
+                payload={"summary": review.summary},
+            ),
+        ]
+        await self._event_store.append_many(events)
+        return SessionStepResult(
+            session=completed,
+            events=events,
+            feedback_items=review.feedback_items,
             review_items=review_items,
         )
 

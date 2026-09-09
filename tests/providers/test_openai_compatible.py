@@ -12,8 +12,10 @@ from lingualoop.core import (
     Message,
     MessageRole,
     PracticeInstruction,
+    PracticeSession,
     ProficiencyLevel,
     ReviewItemKind,
+    SessionUserProfile,
 )
 from lingualoop.providers.openai_compatible import (
     OpenAICompatibleLLMProvider,
@@ -175,6 +177,48 @@ def test_provider_parses_feedback_and_review_items() -> None:
         assert feedback[0].corrected == "I went"
         assert review_items[0].kind == ReviewItemKind.CLOZE
         assert review_items[0].answer == "went"
+
+    asyncio.run(run_case())
+
+
+def test_provider_parses_session_review() -> None:
+    async def run_case() -> None:
+        reasoning_client = FakeChatClient(
+            "```json\n"
+            '{"summary":"Use past tense more consistently.",'
+            '"focus_areas":["simple past tense"],'
+            '"feedback_items":[{"error_type":"grammar","original":"I go",'
+            '"corrected":"I went","explanation":"Use past tense."}],'
+            '"review_items":[{"kind":"cloze","prompt":"I ___ home.","answer":"went"}],'
+            '"next_action":"Review tomorrow."}\n'
+            "```"
+        )
+        provider = OpenAICompatibleLLMProvider(
+            _settings(),
+            reasoning_client=reasoning_client,
+            dialogue_client=FakeChatClient("unused"),
+        )
+
+        review = await provider.summarize_session(
+            session=PracticeSession(
+                material_id="mat_1",
+                pattern_id="guided_roleplay",
+                profile=SessionUserProfile(
+                    profile_level=ProficiencyLevel.A2,
+                    native_language=LanguageEnum.CHINESE,
+                    target_language=LanguageEnum.ENGLISH,
+                ),
+                messages=[Message(role=MessageRole.USER, content="I go home.")],
+            ),
+            material=_material(),
+            target_language=LanguageEnum.ENGLISH,
+        )
+
+        assert review.summary == "Use past tense more consistently."
+        assert review.focus_areas == ["simple past tense"]
+        assert review.feedback_items[0].corrected == "I went"
+        assert review.review_items[0].answer == "went"
+        assert review.next_action == "Review tomorrow."
 
     asyncio.run(run_case())
 

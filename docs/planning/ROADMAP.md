@@ -16,14 +16,17 @@
 
 - [x] 创建应用脚手架
 - [x] 建立 PySide6/QML 桌面端和 Android 适配方向
-- [ ] 实现 Python core Pydantic models 和 session event schema
-- [ ] 实现 material lifecycle：raw source、lesson-ready text、segment metadata
+- [x] 实现 Python core Pydantic models 和 session event schema
+- [x] 实现 material lifecycle：raw source、lesson-ready text、segment metadata
 - [ ] 实现 Agent Kernel 的 direct deterministic runner
-- [ ] 实现材料创建和管理
-- [ ] 实现材料分析 pipeline
-- [ ] 实现基于材料的文本对话
-- [ ] 实现会话复盘和 review items
-- [ ] 实现 review outcome 和用户控制事件：again、hard、good、easy、pause、ignore、delete、archive、mastered
+- [x] 实现材料创建和管理
+- [x] 实现材料分析 pipeline
+- [x] 实现基于材料的文本对话
+- [x] 实现会话复盘和 review items
+- [x] 实现 review outcome 和用户控制事件：again、hard、good、easy、pause、ignore、delete、archive、mastered
+- [x] 实现本地 SQLite 持久化和启动恢复
+- [x] 实现 Markdown/DOCX 材料导入
+- [x] 重做桌面端三栏工作台 UI 和窄屏折叠规则
 - [ ] 实现最小 plugin registry
 - [ ] 实现 capability requirement check
 - [ ] 实现内置 input-derived 文本学习 Pattern

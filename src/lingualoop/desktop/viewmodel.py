@@ -10,7 +10,15 @@ from typing import Any
 from PySide6.QtCore import QObject, Property, QThread, Signal, Slot, QUrl
 
 from lingualoop.application import LearningWorkbench
-from lingualoop.core import LanguageEnum, MaterialSourceType, ProficiencyLevel
+from lingualoop.core import (
+    LanguageEnum,
+    MaterialSourceType,
+    MaterialTrack,
+    ProficiencyLevel,
+    ReviewRating,
+    ReviewStatus,
+)
+from lingualoop.infrastructure.material_import import import_material_file
 from lingualoop.kernel import SessionStepResult
 
 
@@ -51,6 +59,9 @@ class LearningViewModel(QObject):
     messagesChanged = Signal()
     feedbackItemsChanged = Signal()
     reviewItemsChanged = Signal()
+    materialsChanged = Signal()
+    dueReviewCountChanged = Signal()
+    messageSent = Signal()
 
     def __init__(self, workbench: LearningWorkbench, provider_label: str) -> None:
         super().__init__()
@@ -62,6 +73,7 @@ class LearningViewModel(QObject):
         self._feedback_items: list[dict[str, str]] = []
         self._review_items: list[dict[str, str]] = []
         self._threads: list[QThread] = []
+        self._refresh_review_items()
 
     @Property(str, constant=True)
     def providerLabel(self) -> str:
@@ -129,6 +141,32 @@ class LearningViewModel(QObject):
     def reviewItems(self) -> list[dict[str, str]]:
         return self._review_items
 
+    @Property(list, notify=materialsChanged)
+    def materials(self) -> list[dict[str, str]]:
+        return [
+            {
+                "id": item.id,
+                "title": item.title,
+                "sourceType": item.source_type.value,
+                "sourcePath": item.source_path or "",
+            }
+            for item in self._workbench.materials
+        ]
+
+    @Property(int, notify=dueReviewCountChanged)
+    def dueReviewCount(self) -> int:
+        return self._workbench.due_review_count
+
+    @Property(str, notify=materialChanged)
+    def materialTitle(self) -> str:
+        return self._workbench.material.title if self._workbench.material else ""
+
+    @Property(str, notify=materialChanged)
+    def materialContent(self) -> str:
+        if self._workbench.material is None:
+            return ""
+        return self._workbench.material.normalized_content or self._workbench.material.content
+
     @Slot(str, str, str, str, str, str)
     def loadMaterial(
         self,
@@ -156,6 +194,34 @@ class LearningViewModel(QObject):
 
         self._run_operation("正在分析材料...", operation, self._after_material_loaded)
 
+    @Slot(str, str, str, str, str, str)
+    def importMaterial(
+        self,
+        path_text: str,
+        source_language: str,
+        target_language: str,
+        native_language: str,
+        learner_level: str,
+        track: str,
+    ) -> None:
+        try:
+            imported = import_material_file(_local_path(path_text) or Path(path_text))
+        except Exception as exc:  # noqa: BLE001 - user-facing import error
+            self.errorOccurred.emit(f"导入失败：{exc}")
+            return
+
+        async def operation() -> Any:
+            return await self._workbench.load_imported_material(
+                imported,
+                source_language=LanguageEnum(source_language),
+                target_language=LanguageEnum(target_language),
+                native_language=LanguageEnum(native_language),
+                learner_level=ProficiencyLevel(learner_level),
+                track=MaterialTrack(track),
+            )
+
+        self._run_operation("正在导入并分析材料...", operation, self._after_material_loaded)
+
     @Slot()
     def startPractice(self) -> None:
         self._run_operation("正在生成练习任务...", self._workbench.start_session, self._after_session_changed)
@@ -169,8 +235,61 @@ class LearningViewModel(QObject):
         self._run_operation(
             "正在获取 AI 回复...",
             lambda: self._workbench.send_message(content),
+            self._after_message_sent,
+        )
+
+    @Slot()
+    def finishPractice(self) -> None:
+        self._run_operation(
+            "正在生成复盘...",
+            self._workbench.complete_session,
             self._after_session_changed,
         )
+
+    @Slot(str, str, str)
+    def reviewOutcome(self, review_id: str, rating: str, answer: str) -> None:
+        try:
+            review_rating = ReviewRating(rating)
+        except ValueError:
+            self.errorOccurred.emit("无效的复习结果。")
+            return
+        self._run_operation(
+            "正在保存复习结果...",
+            lambda: self._workbench.record_review_outcome(
+                review_id, review_rating, answer or None
+            ),
+            lambda _outcome: self._after_review_changed(),
+        )
+
+    @Slot(str, str)
+    def updateReviewStatus(self, review_id: str, status: str) -> None:
+        try:
+            review_status = ReviewStatus(status)
+        except ValueError:
+            self.errorOccurred.emit("无效的复习状态。")
+            return
+        self._run_operation(
+            "正在更新复习项...",
+            lambda: self._workbench.update_review_status(review_id, review_status),
+            lambda _result: self._after_review_changed(),
+        )
+
+    @Slot(str)
+    def selectMaterial(self, material_id: str) -> None:
+        try:
+            self._workbench.select_material(material_id)
+        except Exception as exc:  # noqa: BLE001 - forwarded to UI
+            self.errorOccurred.emit(str(exc))
+            return
+        self._messages = []
+        self._feedback_items = []
+        self._refresh_review_items()
+        self.materialChanged.emit()
+        self.sessionChanged.emit()
+        self.messagesChanged.emit()
+        self.feedbackItemsChanged.emit()
+        self.reviewItemsChanged.emit()
+        self.dueReviewCountChanged.emit()
 
     @Slot(str)
     def exportSession(self, path_text: str) -> None:
@@ -199,6 +318,8 @@ class LearningViewModel(QObject):
         self.messagesChanged.emit()
         self.feedbackItemsChanged.emit()
         self.reviewItemsChanged.emit()
+        self.materialsChanged.emit()
+        self.dueReviewCountChanged.emit()
 
     def _run_operation(
         self,
@@ -243,12 +364,13 @@ class LearningViewModel(QObject):
     def _after_material_loaded(self, _material: Any) -> None:
         self._messages = []
         self._feedback_items = []
-        self._review_items = []
+        self._refresh_review_items()
         self.materialChanged.emit()
         self.sessionChanged.emit()
         self.messagesChanged.emit()
         self.feedbackItemsChanged.emit()
         self.reviewItemsChanged.emit()
+        self.materialsChanged.emit()
         self._set_status("材料分析完成，可以开始练习。")
 
     def _after_session_changed(self, result: SessionStepResult) -> None:
@@ -265,15 +387,39 @@ class LearningViewModel(QObject):
             }
             for item in session.feedback_items
         ]
-        self._review_items = [
-            {"prompt": item.prompt, "answer": item.answer}
-            for item in session.review_items
-        ]
+        self._review_items = self._review_dtos(session.review_items)
         self.sessionChanged.emit()
         self.messagesChanged.emit()
         self.feedbackItemsChanged.emit()
         self.reviewItemsChanged.emit()
+        self.dueReviewCountChanged.emit()
         self._set_status("练习已更新。")
+
+    def _after_message_sent(self, result: SessionStepResult) -> None:
+        self._after_session_changed(result)
+        self.messageSent.emit()
+
+    def _after_review_changed(self) -> None:
+        self._refresh_review_items()
+        self.reviewItemsChanged.emit()
+        self.dueReviewCountChanged.emit()
+        self._set_status("复习结果已保存。")
+
+    def _refresh_review_items(self) -> None:
+        self._review_items = self._review_dtos(self._workbench.review_queue)
+
+    @staticmethod
+    def _review_dtos(items: list[Any]) -> list[dict[str, str]]:
+        return [
+            {
+                "id": item.id,
+                "prompt": item.prompt,
+                "answer": item.answer,
+                "context": item.context or "",
+                "dueAt": item.due_at.isoformat() if item.due_at else "",
+            }
+            for item in items
+        ]
 
     def _set_status(self, value: str) -> None:
         self._status = value
