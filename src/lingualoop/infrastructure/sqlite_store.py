@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from lingualoop.core.domain import (
     LearningMaterial,
+    MaterialAnalysis,
     PracticeSession,
     ReviewItem,
     ReviewStatus,
@@ -41,162 +43,220 @@ class SQLiteStore(EventStore):
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path).expanduser() if path else default_database_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(self.path)
-        self._connection.row_factory = sqlite3.Row
         self._initialize()
 
+    @contextmanager
+    def _connect(self):
+        connection = sqlite3.connect(self.path, timeout=10)
+        connection.row_factory = sqlite3.Row
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
     def _initialize(self) -> None:
-        self._connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS schema_meta (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS materials (
-                id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                payload TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                material_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                payload TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS review_items (
-                id TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                due_at TEXT,
-                payload TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS events (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                occurred_at TEXT NOT NULL,
-                payload TEXT NOT NULL
-            );
-            INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('version', '1');
-            """
-        )
-        self._connection.commit()
+        with self._connect() as connection:
+            connection.execute('PRAGMA journal_mode=WAL')
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS schema_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS materials (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS preparation_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    source_hash TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_preparation_source ON preparation_cache(source_hash);
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    material_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS review_items (
+                    id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    due_at TEXT,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS events (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('version', '1');
+                CREATE INDEX IF NOT EXISTS idx_sessions_material_updated ON sessions(material_id, updated_at DESC);
+                """
+            )
 
     def close(self) -> None:
-        self._connection.close()
+        # Connections are scoped to each operation; retained for API compatibility.
+        pass
 
     def save_material(self, material: LearningMaterial) -> None:
-        payload = _dump(material)
-        self._connection.execute(
-            """
-            INSERT INTO materials(id, created_at, payload) VALUES (?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET created_at=excluded.created_at, payload=excluded.payload
-            """,
-            (material.id, material.created_at.isoformat(), payload),
-        )
-        self._connection.commit()
+        with self._connect() as connection:
+            payload = _dump(material)
+            connection.execute(
+                """
+                INSERT INTO materials(id, created_at, payload) VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET created_at=excluded.created_at, payload=excluded.payload
+                """,
+                (material.id, material.created_at.isoformat(), payload),
+            )
 
     def list_materials(self, limit: int | None = None) -> list[LearningMaterial]:
-        query = "SELECT payload FROM materials ORDER BY created_at DESC"
-        params: tuple[Any, ...] = ()
-        if limit is not None:
-            query += " LIMIT ?"
-            params = (limit,)
-        rows = self._connection.execute(query, params).fetchall()
-        return [LearningMaterial.model_validate(json.loads(row["payload"])) for row in rows]
+        with self._connect() as connection:
+            query = "SELECT payload FROM materials ORDER BY created_at DESC"
+            params: tuple[Any, ...] = ()
+            if limit is not None:
+                query += " LIMIT ?"
+                params = (limit,)
+            rows = connection.execute(query, params).fetchall()
+            return [LearningMaterial.model_validate(json.loads(row["payload"])) for row in rows]
 
     def get_material(self, material_id: str) -> LearningMaterial | None:
-        row = self._connection.execute(
-            "SELECT payload FROM materials WHERE id = ?", (material_id,)
-        ).fetchone()
-        return (
-            LearningMaterial.model_validate(json.loads(row["payload"])) if row else None
-        )
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM materials WHERE id = ?", (material_id,)
+            ).fetchone()
+            return (
+                LearningMaterial.model_validate(json.loads(row["payload"])) if row else None
+            )
 
     def save_session(self, session: PracticeSession) -> None:
-        payload = _dump(session)
-        self._connection.execute(
-            """
-            INSERT INTO sessions(id, material_id, status, updated_at, payload)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET material_id=excluded.material_id,
-              status=excluded.status, updated_at=excluded.updated_at, payload=excluded.payload
-            """,
-            (
-                session.id,
-                session.material_id,
-                session.status.value,
-                session.updated_at.isoformat(),
-                payload,
-            ),
-        )
-        for item in session.review_items:
-            self.save_review_item(item, commit=False)
-        self._connection.commit()
+        with self._connect() as connection:
+            payload = _dump(session)
+            connection.execute(
+                """
+                INSERT INTO sessions(id, material_id, status, updated_at, payload)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET material_id=excluded.material_id,
+                  status=excluded.status, updated_at=excluded.updated_at, payload=excluded.payload
+                """,
+                (
+                    session.id,
+                    session.material_id,
+                    session.status.value,
+                    session.updated_at.isoformat(),
+                    payload,
+                ),
+            )
+            for item in session.review_items:
+                _save_review_item(connection, item)
 
-    def list_sessions(self, limit: int | None = None) -> list[PracticeSession]:
-        query = "SELECT payload FROM sessions ORDER BY updated_at DESC"
-        params: tuple[Any, ...] = ()
-        if limit is not None:
-            query += " LIMIT ?"
-            params = (limit,)
-        rows = self._connection.execute(query, params).fetchall()
-        return [PracticeSession.model_validate(json.loads(row["payload"])) for row in rows]
+    def list_sessions(self, limit: int | None = None, *, material_id: str | None = None) -> list[PracticeSession]:
+        with self._connect() as connection:
+            query = "SELECT payload FROM sessions"
+            params: tuple[Any, ...] = ()
+            if material_id is not None:
+                query += ' WHERE material_id = ?'
+                params = (material_id,)
+            query += ' ORDER BY updated_at DESC'
+            if limit is not None:
+                query += " LIMIT ?"
+                params += (limit,)
+            rows = connection.execute(query, params).fetchall()
+            return [PracticeSession.model_validate(json.loads(row["payload"])) for row in rows]
 
     def get_session(self, session_id: str) -> PracticeSession | None:
-        row = self._connection.execute(
-            "SELECT payload FROM sessions WHERE id = ?", (session_id,)
-        ).fetchone()
-        return PracticeSession.model_validate(json.loads(row["payload"])) if row else None
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            return PracticeSession.model_validate(json.loads(row["payload"])) if row else None
+
+    def get_preparation_cache(self, cache_key: str) -> MaterialAnalysis | None:
+        with self._connect() as connection:
+            row = connection.execute('SELECT payload FROM preparation_cache WHERE cache_key = ?', (cache_key,)).fetchone()
+            if row is None:
+                return None
+            try:
+                return MaterialAnalysis.model_validate(json.loads(row['payload']))
+            except (ValueError, TypeError):
+                return None
+
+    def save_preparation_cache(self, cache_key: str, source_hash: str, analysis: MaterialAnalysis) -> None:
+        with self._connect() as connection:
+            # Serialize read/merge/write across imports sharing a cache identity.
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT payload FROM preparation_cache WHERE cache_key = ?', (cache_key,)).fetchone()
+            if row:
+                try:
+                    previous = MaterialAnalysis.model_validate(json.loads(row['payload']))
+                except (ValueError, TypeError):
+                    previous = None
+                if previous:
+                    if previous.preparation_complete and not analysis.preparation_complete:
+                        return
+                    if not analysis.preparation_complete:
+                        chunks = {(c.start_char, c.end_char, c.content_hash): c for c in previous.chunks}
+                        chunks.update({(c.start_char, c.end_char, c.content_hash): c for c in analysis.chunks})
+                        analysis = analysis.model_copy(update={'chunks': sorted(chunks.values(), key=lambda c: c.start_char)})
+            connection.execute('INSERT INTO preparation_cache(cache_key,source_hash,updated_at,payload) VALUES(?,?,?,?) '
+                'ON CONFLICT(cache_key) DO UPDATE SET source_hash=excluded.source_hash, updated_at=excluded.updated_at, payload=excluded.payload',
+                (cache_key, source_hash, datetime.now(timezone.utc).isoformat(), _dump(analysis)))
 
     def save_review_item(self, item: ReviewItem, *, commit: bool = True) -> None:
-        self._connection.execute(
-            """
-            INSERT INTO review_items(id, status, due_at, payload) VALUES (?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET status=excluded.status,
-              due_at=excluded.due_at, payload=excluded.payload
-            """,
-            (item.id, item.status.value, _iso(item.due_at), _dump(item)),
-        )
-        if commit:
-            self._connection.commit()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO review_items(id, status, due_at, payload) VALUES (?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET status=excluded.status,
+                  due_at=excluded.due_at, payload=excluded.payload
+                """,
+                (item.id, item.status.value, _iso(item.due_at), _dump(item)),
+            )
 
     def list_review_items(
         self, *, due_only: bool = False, limit: int | None = None
     ) -> list[ReviewItem]:
-        now = datetime.now(timezone.utc).isoformat()
-        query = "SELECT payload FROM review_items WHERE status = ?"
-        params: list[Any] = [ReviewStatus.ACTIVE.value]
-        if due_only:
-            query += " AND (due_at IS NULL OR due_at <= ?)"
-            params.append(now)
-        query += " ORDER BY due_at ASC, id ASC"
-        if limit is not None:
-            query += " LIMIT ?"
-            params.append(limit)
-        rows = self._connection.execute(query, tuple(params)).fetchall()
-        return [ReviewItem.model_validate(json.loads(row["payload"])) for row in rows]
+        with self._connect() as connection:
+            now = datetime.now(timezone.utc).isoformat()
+            query = "SELECT payload FROM review_items WHERE status = ?"
+            params: list[Any] = [ReviewStatus.ACTIVE.value]
+            if due_only:
+                query += " AND (due_at IS NULL OR due_at <= ?)"
+                params.append(now)
+            query += " ORDER BY due_at ASC, id ASC"
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+            rows = connection.execute(query, tuple(params)).fetchall()
+            return [ReviewItem.model_validate(json.loads(row["payload"])) for row in rows]
 
     async def append(self, event: SessionEvent) -> None:
-        self._connection.execute(
-            "INSERT OR REPLACE INTO events(id, session_id, occurred_at, payload) VALUES (?, ?, ?, ?)",
-            (event.id, event.session_id, event.occurred_at.isoformat(), _dump(event)),
-        )
-        self._connection.commit()
-
-    async def append_many(self, events: list[SessionEvent]) -> None:
-        for event in events:
-            self._connection.execute(
+        with self._connect() as connection:
+            connection.execute(
                 "INSERT OR REPLACE INTO events(id, session_id, occurred_at, payload) VALUES (?, ?, ?, ?)",
                 (event.id, event.session_id, event.occurred_at.isoformat(), _dump(event)),
             )
-        self._connection.commit()
+
+    async def append_many(self, events: list[SessionEvent]) -> None:
+        with self._connect() as connection:
+            for event in events:
+                connection.execute(
+                    "INSERT OR REPLACE INTO events(id, session_id, occurred_at, payload) VALUES (?, ?, ?, ?)",
+                    (event.id, event.session_id, event.occurred_at.isoformat(), _dump(event)),
+                )
 
     async def list_session_events(self, session_id: str) -> list[SessionEvent]:
-        rows = self._connection.execute(
-            "SELECT payload FROM events WHERE session_id = ? ORDER BY occurred_at ASC",
-            (session_id,),
-        ).fetchall()
-        return [SessionEvent.model_validate(json.loads(row["payload"])) for row in rows]
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM events WHERE session_id = ? ORDER BY occurred_at ASC",
+                (session_id,),
+            ).fetchall()
+            return [SessionEvent.model_validate(json.loads(row["payload"])) for row in rows]
 
 
 def _dump(value: Any) -> str:
@@ -205,3 +265,12 @@ def _dump(value: Any) -> str:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
+
+
+def _save_review_item(connection: sqlite3.Connection, item: ReviewItem) -> None:
+    connection.execute(
+        "INSERT INTO review_items(id, status, due_at, payload) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET status=excluded.status, "
+        "due_at=excluded.due_at, payload=excluded.payload",
+        (item.id, item.status.value, _iso(item.due_at), _dump(item)),
+    )

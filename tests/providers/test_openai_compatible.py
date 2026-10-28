@@ -43,6 +43,21 @@ def test_normalize_openai_base_url_adds_v1_only_for_root_url() -> None:
     )
 
 
+def test_preparation_cache_identity_survives_key_rotation_but_separates_models():
+    def identity(**changes):
+        settings = _settings().model_copy(update=changes)
+        return OpenAICompatibleLLMProvider(settings,
+            reasoning_client=FakeChatClient('unused'),
+            dialogue_client=FakeChatClient('unused')).preparation_cache_identity
+
+    original = identity()
+    assert identity(api_key=SecretStr('rotated-private-key')) == original
+    assert identity(dialogue_model='another-flash') == original
+    assert identity(reasoning_model='another-reasoner') != original
+    assert identity(base_url='https://other.example.com/v1') != original
+    assert 'rotated-private-key' not in identity(api_key=SecretStr('rotated-private-key'))
+
+
 def test_settings_build_client_kwargs_with_thinking_disabled() -> None:
     settings = _settings(disable_thinking=True)
 
@@ -52,7 +67,7 @@ def test_settings_build_client_kwargs_with_thinking_disabled() -> None:
     assert reasoning_kwargs["base_url"] == "https://api.example.com/v1"
     assert reasoning_kwargs["model"] == "reasoning-model"
     assert dialogue_kwargs["model"] == "dialogue-model"
-    assert reasoning_kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert reasoning_kwargs["extra_body"] is None
     assert dialogue_kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
     assert reasoning_kwargs["use_responses_api"] is False
 
@@ -62,7 +77,10 @@ def test_provider_parses_material_analysis() -> None:
         reasoning_client = FakeChatClient(
             '{"summary":"Short summary","keywords":["market"],'
             '"expressions":[{"text":"went to the market","meaning":"visited a market"}],'
-            '"difficulties":["past tense"],"suggested_goals":["retell the material"]}'
+            '"difficulties":["past tense"],"suggested_goals":["retell the material"],'
+            '"topics":[{"title":"Market","opening_question":"Do you enjoy markets?","source_excerpt":"market",'
+            '"answer_branches":[{"user_intent":"Likes markets","response_points":["market"],'
+            '"suggested_reply":"I like them too.","follow_up":"What do you enjoy?","source_excerpts":["market"]}]}]}'
         )
         provider = OpenAICompatibleLLMProvider(
             _settings(),
@@ -109,6 +127,9 @@ def test_provider_routes_generation_to_reasoning_client() -> None:
         assert result == "Practice one sentence."
         assert len(reasoning_client.calls) == 1
         assert dialogue_client.calls == []
+        prompt_text = "\n".join(message.content for message in reasoning_client.calls[0])
+        assert "Do not invent/add facts" in prompt_text
+        assert "practice extension" in prompt_text
 
     asyncio.run(run_case())
 

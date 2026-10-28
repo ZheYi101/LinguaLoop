@@ -45,15 +45,13 @@ def parse_args(argv: Sequence[str] | None = None) -> DesktopRuntimeConfig:
 def create_workbench(*, use_mock: bool = False) -> LearningWorkbench:
     load_dotenv(dotenv_path=Path.cwd() / ".env")
     try:
-        return LearningWorkbench(build_provider(use_mock))
-    except Exception as exc:
+        provider = build_provider(use_mock)
+    except Exception:
         if use_mock:
             raise
-        raise RuntimeError(
-            "真实 AI 配置不可用。请先在 .env 或系统环境变量中设置 "
-            "OPENAI_API_KEY、OPENAI_BASE_URL、OPENAI_REASONING_MODEL；"
-            "离线调试可运行 `uv run lingualoop-desktop --mock`。"
-        ) from exc
+        from lingualoop.providers.unavailable import UnavailableLearningLLMProvider
+        provider = UnavailableLearningLLMProvider()
+    return LearningWorkbench(provider)
 
 
 def desktop_dependencies_available() -> bool:
@@ -67,13 +65,14 @@ def desktop_dependencies_available() -> bool:
 def _load_qt() -> dict[str, Any]:
     try:
         from PySide6.QtCore import QLibraryInfo, QUrl
-        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtGui import QFont, QGuiApplication
         from PySide6.QtQml import QQmlApplicationEngine
     except ImportError as exc:
         raise ImportError(
             "桌面端依赖尚未安装。请运行 `uv sync --extra desktop` 安装 PySide6。"
         ) from exc
     return {
+        "QFont": QFont,
         "QGuiApplication": QGuiApplication,
         "QQmlApplicationEngine": QQmlApplicationEngine,
         "QUrl": QUrl,
@@ -143,13 +142,21 @@ def _is_same_or_child(path: Path, root: Path) -> bool:
     return True
 
 
-def create_engine(viewmodel: Any) -> Any:
+def create_engine(viewmodel: Any, *, window_settings=None, initial_visible: bool = True) -> Any:
     qt = _load_qt()
-    use_kirigami = kirigami_runtime_usable()
+    from PySide6.QtQuickControls2 import QQuickStyle
+    if QQuickStyle.name() != "Material":
+        QQuickStyle.setStyle("Material")
+    _apply_default_font(qt["QGuiApplication"], qt["QFont"])
+    use_kirigami = kirigami_runtime_usable() and os.getenv("LINGUALOOP_KIRIGAMI_MODE", "auto") == "on"
     if use_kirigami:
         _configure_kirigami_dll_path()
     engine = qt["QQmlApplicationEngine"]()
+    from lingualoop.desktop.window import DesktopWindowController
+    controller = DesktopWindowController(window_settings, engine)
     engine.rootContext().setContextProperty("learningViewModel", viewmodel)
+    engine.rootContext().setContextProperty("desktopWindow", controller)
+    engine.rootContext().setContextProperty("initialWindowVisible", initial_visible)
     qml_root = files("lingualoop.desktop").joinpath("qml")
     qml_name = "Main.qml" if use_kirigami else "MainFallback.qml"
     qml_path = qml_root.joinpath(qml_name)
@@ -160,7 +167,27 @@ def create_engine(viewmodel: Any) -> Any:
             engine.load(qt["QUrl"].fromLocalFile(str(fallback)))
     if not engine.rootObjects():
         raise RuntimeError("QML 页面加载失败，请参考 docs/desktop/QML_RUNTIME.md 配置 Qt runtime。")
+    controller.attach(engine.rootObjects()[0])
+    engine.window_controller = controller
     return engine
+
+
+def _apply_default_font(qgui_application: Any, qfont: Any) -> None:
+    app = qgui_application.instance()
+    if app is None:
+        return
+    family = _preferred_ui_font_family()
+    font = qfont(family)
+    font.setPointSize(10)
+    app.setFont(font)
+
+
+def _preferred_ui_font_family() -> str:
+    if os.name == "nt":
+        return "Microsoft YaHei UI"
+    if sys.platform == "darwin":
+        return "PingFang SC"
+    return "Noto Sans CJK SC"
 
 
 def _configure_kirigami_dll_path() -> None:
@@ -189,12 +216,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         config = parse_args(argv)
         qt = _load_qt()
-        os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
+        os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Material")
+        os.environ.setdefault("QT_QUICK_CONTROLS_MATERIAL_THEME", "Light")
         app = qt["QGuiApplication"](["lingualoop-desktop", *list(argv or sys.argv[1:])])
         from lingualoop.desktop.viewmodel import LearningViewModel
 
         viewmodel = LearningViewModel(create_workbench(use_mock=config.use_mock), config.provider_label)
         engine = create_engine(viewmodel)
+        app.aboutToQuit.connect(viewmodel.close)
         if config.smoke:
             from PySide6.QtCore import QTimer
 

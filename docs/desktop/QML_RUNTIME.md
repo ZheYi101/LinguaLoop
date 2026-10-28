@@ -2,7 +2,7 @@
 
 ## Python 依赖
 
-桌面依赖包含 `PySide6`：
+桌面依赖固定 `PySide6==6.11.1`，默认 Qt Quick Controls Material 不需要额外 QML 安装：
 
 ```powershell
 uv sync --extra desktop
@@ -12,7 +12,21 @@ Kirigami 不是项目通过 `pip install kirigami` 获取的普通 Python 包。
 
 ## Windows 开发
 
-当前入口会优先加载可用的 `org.kde.kirigami`。如果当前环境没有该 module，或 module 与正在运行的 PySide6/Qt 不兼容，POC 会自动加载 `MainFallback.qml`，使用 Qt Quick Controls 验证 Python/QML 业务闭环。这个 fallback 不是最终 Kirigami 视觉效果，但材料、练习、复盘三个页面和 Python ViewModel 是同一套功能边界。
+当前默认壳使用自绘 MD3 标题栏，通过 `Qt.FramelessWindowHint` 移除原生 Windows 顶栏。窗口拖动与边缘缩放分别调用 Qt `startSystemMove` / `startSystemResize`；位置、正常尺寸、最大化状态保存在独立 `LinguaLoop/Window` QSettings 中，恢复时校验可用屏幕范围。支持 Alt+F10 最大化/恢复、Alt+F4 关闭。宽窗口仅“材料 / 对话”为主入口，复盘和设置在侧栏底部及“更多”菜单；紧凑窗口也可从“更多”访问。
+
+本阶段默认纯文本，不要求 STT/TTS 配置。可编辑草稿通过 Ctrl+Enter 发送；前台流式回复与后台参考准备分别显示状态。只在语音服务配置齐全时显示原有录音入口。
+
+可在不展示任何窗口、不读取 `.env` 或用户学习数据的条件下，核对真实 Windows HWND 样式：
+
+```powershell
+uv run python scripts/check_desktop_window.py
+```
+
+2026-10-24 本机结果为 `platform=windows, visible=false, win32_style=0x860b0000, native_caption=false, device_pixel_ratio=1.0`。该检查仅证明原生标题栏已移除；物理鼠标拖动、Windows Snap、跨 DPI / 多屏移动仍需桌面验收。offscreen Qt Test 的窗口控制、恢复和缩放转交检查不能替代实际操作系统交互。
+
+UI 方案、参考源码和本轮失败修复记录见 [UI_SURFACE_PLAN](../product/UI_SURFACE_PLAN.md)；唯一项目状态表见 [ROADMAP](../planning/ROADMAP.md)。
+
+当前默认加载 `MainFallback.qml` 的 Qt ApplicationWindow 和统一 MD3 页面。只有明确配置 `LINGUALOOP_KIRIGAMI_MODE=on` 并具备兼容 runtime 才使用 Kirigami 壳；两个壳共享材料、对话、复盘、设置页面和 ViewModel。普通 Windows 运行无需安装 Craft。以下步骤只供可选 Kirigami 环境使用。
 
 Windows 上，Craft 安装的 Kirigami 原生插件不能直接混用到 PyPI PySide6 wheel 的 Qt 进程中。即使两侧 Qt 都显示为 6.11.1，二进制构建来源不同仍可能在加载 `Kirigamiplugin.dll` 时触发 Windows `0xc0000139`。因此默认 `auto` 模式会拒绝把 `C:\CraftRoot\qml` 的插件加载进 PyPI PySide6，保证桌面端可以稳定使用 fallback 启动。不要通过修改全局 `PATH` 强行将 `C:\CraftRoot\bin` 放在 PySide6 前面。
 
@@ -92,11 +106,11 @@ uv run python -c "from lingualoop.desktop.app import kirigami_runtime_available,
 
 ## Linux
 
-优先使用发行版提供的与 PySide6/Qt6 匹配的 Kirigami runtime。KDE 官方 Python 教程列出了不同发行版的 `kirigami`、PySide6 和 Qt Quick Controls 依赖。
+默认使用随 PySide6 分发的 Qt Material。选择 Kirigami 时使用发行版提供的与 PySide6/Qt6 匹配的 runtime。
 
 ## Android
 
-Android 是第一优先移动验证目标。先用最小 Kirigami 页面确认 module、QML 资源和 Python 入口都能被打包，再扩大页面范围。普通 pytest 不负责 Android 安装和启动；它们属于环境级验收。
+Android 暂不进入 Windows 首版交付。后续移动验证先确认 module、QML 资源和 Python 入口能被打包。普通 pytest 不负责 Android 安装和启动，窄窗口通过不代表移动包可用。
 
 移动模式可用 Qt 官方教程中的环境变量进行本地检查：
 
@@ -109,4 +123,8 @@ uv run lingualoop-desktop --mock
 
 ## 资源打包
 
-QML 文件通过 `setuptools.package-data` 随 `lingualoop.desktop` 分发。发布前仍需增加平台打包配置，确保 `org.kde.kirigami`、Qt Quick Controls style 和图标资源一起进入安装包。
+QML 根文件、`pages/`、`components/`、`design/AppTheme.qml` 和 `qmldir`、Material Symbols SVG 和许可证通过 `setuptools.package-data` 随 wheel 分发。可以运行 `uv build --wheel --out-dir build/package-check` 检查资源。独立 Windows 安装器仍待增加平台打包配置，需包含 Qt Multimedia、Qt Material style 和相关插件；不能把 wheel 构建通过当作 exe 安装器已经可用。
+
+构建后运行 `uv run python scripts/check_wheel_resources.py build/package-check/lingualoop-0.1.0-py3-none-any.whl`，检查全部资源并从 wheel 的隔离临时目录加载 QML，避免误用源码目录造成打包假通过。
+
+2026-10-24 新候选验证通过：39 个 QML / SVG / 许可证资源齐全，隔离导入 wheel 内 `WindowController` 并加载隐藏窗口，确认三个窗口按钮、拖动区、边缘缩放句柄和 frameless flags。探针使用临时 SQLite 与两个临时 QSettings 文件，不读取 `.env`，不安装到全局环境。候选 SHA256 与首次选择器失败的修复记录见 [UI_SURFACE_PLAN](../product/UI_SURFACE_PLAN.md)。这仍是 wheel 资源与离屏加载验收，不等价于 Windows exe 安装器、物理拖动或跨 DPI 验收。

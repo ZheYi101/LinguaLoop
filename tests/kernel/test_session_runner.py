@@ -106,6 +106,48 @@ class FakeLearningLLMProvider:
         )
 
 
+class NoisyFeedbackProvider(FakeLearningLLMProvider):
+    async def correct_answer(
+        self,
+        *,
+        current_instruction: PracticeInstruction,
+        user_message: Message,
+        target_language: LanguageEnum,
+    ) -> list[FeedbackItem]:
+        return [
+            FeedbackItem(
+                error_type="grammar",
+                original="go",
+                corrected="went",
+                explanation="Use past tense.",
+            ),
+            FeedbackItem(
+                error_type="grammar",
+                original="go",
+                corrected="went",
+                explanation="Duplicate correction.",
+            ),
+            FeedbackItem(
+                error_type="grammar",
+                original="buy",
+                corrected="bought",
+                explanation="Use past tense.",
+            ),
+            FeedbackItem(
+                error_type="vocabulary",
+                original="apple",
+                corrected="apples",
+                explanation="Use plural form here.",
+            ),
+            FeedbackItem(
+                error_type="fluency",
+                original="market",
+                corrected="the market",
+                explanation="Use a natural noun phrase.",
+            ),
+        ]
+
+
 def test_direct_runner_starts_session_with_plan_and_events() -> None:
     async def run_case() -> None:
         material = _material()
@@ -159,6 +201,27 @@ def test_direct_runner_handles_user_message_without_final_review_items() -> None
             SessionEventType.FEEDBACK_CREATED,
         ]
         assert len(await store.list_session_events(started.session.id)) == 5
+
+    asyncio.run(run_case())
+
+
+def test_direct_runner_dedupes_and_limits_feedback_items() -> None:
+    async def run_case() -> None:
+        material = _material()
+        store = InMemoryEventStore()
+        runner = DirectLearningSessionRunner(NoisyFeedbackProvider(), store)
+        started = await runner.start_session(material=material, profile=_profile())
+
+        result = await runner.handle_user_message(
+            session=started.session,
+            material=material,
+            user_content="Yesterday I go to market and buy apple.",
+        )
+
+        correction_pairs = [(item.original, item.corrected) for item in result.feedback_items]
+        assert correction_pairs == [("go", "went"), ("buy", "bought"), ("apple", "apples")]
+        assert len(result.session.feedback_items) == 3
+        assert all(item.source_message_id is not None for item in result.feedback_items)
 
     asyncio.run(run_case())
 

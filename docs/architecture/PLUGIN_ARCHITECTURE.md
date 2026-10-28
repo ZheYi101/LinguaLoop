@@ -17,6 +17,8 @@ Patterns
 
 项目的稳定核心应定义语言学习语义和数据边界；Plugins 负责提供外部能力和交互模态；Patterns 负责组织「怎么学、怎么练、多久复习一次」。
 
+产品主旨以 [Project Brief](../product/PROJECT_BRIEF.md) 为准：沉浸材料提供共同语境，语音讨论练输出。插件可替换不等于产品能力可省略；正式 MVP 的讨论路径必须具备基础语音，已有文本路径承担原型、辅助输入和回退。
+
 更准确的原则是：
 
 ```text
@@ -325,7 +327,7 @@ LinguaLoop core
 
 - 保留未来替换为 OpenAI Realtime API、Gemini Live API、Pipecat 或其他实时语音方案的空间。
 - 避免用 room / participant / track 这些实时通信概念污染学习领域模型。
-- 允许文本 MVP 先跑通，再把语音作为增强插件接入。
+- 复用已跑通的文本原型，通过可替换语音插件补齐正式 MVP 的核心语音路径。
 - 让语音延迟、打断、首 token、首音频和成本指标独立评估。
 - 让依赖语音的 Pattern 只声明 `voice.session` / `stt.transcribe` / `tts.speak`，不感知 LiveKit。
 
@@ -347,18 +349,19 @@ DeepSeek Harness 可以作为参考对象或实验性 adapter，但不应成为 
 
 ## MVP 策略
 
-第一版仍应优先验证文本学习闭环。插件架构应先做最小可用能力：
+第一版复用现有文本闭环，优先验证“沉浸材料 → 话题 → 语音讨论 → 复盘”。插件架构只补齐这条路径所需的最小能力：
 
 1. Core domain models and schemas。
 2. LearningPattern contract。
 3. Capability contract and requirement check。
 4. LLM provider plugin contract。
 5. Simple plugin registry。
-6. One built-in text Pattern。
-7. Mock provider for tests。
+6. Built-in topic discussion Pattern and optional guided roleplay。
+7. Replaceable basic voice provider and failure fallback。
+8. Mock LLM / voice providers for tests。
 
-语音和 Live2D 不进入最小文本 MVP 的关键路径，但应在架构上预留插件位置。
+基础语音进入 MVP 关键路径；Live2D、连续实时双向语音和完整第三方插件生态作为后续增强。完整 registry 不作为接入首个语音 provider 的前提，先遵守稳定接口和必要的能力检查。
 
 ## 重新评估条件
 
-如果未来 LinguaLoop 的主要体验变成实时口语，而不是文本和材料驱动的综合学习闭环，可以把 `voice-livekit` 升级成更重的 voice subsystem。但即使如此，LiveKit 仍应服务于 LinguaLoop 的学习核心，而不是反过来定义核心领域模型。
+当前产品已经明确以沉浸材料驱动语音输出，但这不自动要求更重的 voice subsystem。若后续连续实时会话、恢复和质量管理超出插件边界，再评估是否升级；无论采用哪个 SDK，都应服务于 LinguaLoop 的学习核心。

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+from time import perf_counter
+from typing import Callable
 
 from lingualoop.core.domain import (
     FeedbackItem,
@@ -17,8 +19,15 @@ from lingualoop.core.domain import (
     SessionUserProfile,
     SessionStatus,
     utc_now,
+    DiscussionTopic,
+    PracticeOptions,
+    PracticeMode,
+    FeedbackTiming,
+    SessionReview,
+    ReplyTiming,
 )
 from lingualoop.core.ports import EventStore, LearningLLMProvider
+from lingualoop.core.preparation_validation import validate_dialogue_preparation
 
 DEFAULT_PATTERN_ID = "guided_roleplay"
 
@@ -29,6 +38,7 @@ class SessionStepResult(BaseModel):
     assistant_message: Message | None = None
     feedback_items: list[FeedbackItem] = Field(default_factory=list)
     review_items: list[ReviewItem] = Field(default_factory=list)
+    timing: ReplyTiming | None = None
 
 
 class DirectLearningSessionRunner:
@@ -46,16 +56,31 @@ class DirectLearningSessionRunner:
         material: LearningMaterial,
         profile: SessionUserProfile,
         pattern_id: str = DEFAULT_PATTERN_ID,
+        topic: DiscussionTopic | None = None,
+        options: PracticeOptions | None = None,
     ) -> SessionStepResult:
-        task_prompt = await self._llm_provider.generate_task(
-            material=material,
-            learner_level=profile.profile_level,
-            target_language=profile.target_language,
-        )
+        if options and options.mode is PracticeMode.ROLEPLAY and not options.role_description.strip():
+            raise ValueError("请描述你和 AI 各自的角色。")
+        if topic and (not options or options.mode is PracticeMode.DISCUSSION):
+            task_prompt = topic.opening_question
+        elif topic:
+            task_prompt = await self._llm_provider.generate_task(
+                material=material, learner_level=profile.profile_level,
+                target_language=profile.target_language, topic=topic, options=options,
+            )
+        else:  # Existing integrations without a topic retain the original task API.
+            task_prompt = await self._llm_provider.generate_task(
+                material=material, learner_level=profile.profile_level,
+                target_language=profile.target_language,
+            )
+        if options:
+            pattern_id = "topic-discussion" if options.mode is PracticeMode.DISCUSSION else "guided_roleplay"
 
         instruction = PracticeInstruction(
             prompt=task_prompt,
             focus_points=_focus_points_from_material(material),
+            metadata={"options": options.model_dump(mode="json") if options else None,
+                      "topic": topic.model_dump(mode="json") if topic else None},
         )
 
         plan = PracticePlan(
@@ -72,6 +97,8 @@ class DirectLearningSessionRunner:
             plan=plan,
             profile=profile,
             messages=[assistant_message],
+            options=options,
+            topic=topic,
         )
 
         events = [
@@ -93,18 +120,26 @@ class DirectLearningSessionRunner:
         )
 
     async def handle_user_message(
-        self, *, session: PracticeSession, material: LearningMaterial, user_content: str
+        self, *, session: PracticeSession, material: LearningMaterial, user_content: str,
+        on_delta: Callable[[str], None] | None = None,
     ) -> SessionStepResult:
         instruction = session.current_instruction
         if instruction is None:
             raise ValueError("Practice session must have an active instruction")
 
         user_message = Message(role=MessageRole.USER, content=user_content)
-        corrections = await self._llm_provider.correct_answer(
-            current_instruction=instruction,
-            user_message=user_message,
-            target_language=session.profile.target_language,
-        )
+        corrections = []
+        # New discussions keep reasoning off the foreground path. End-of-session feedback
+        # remains grounded in confirmed user messages. Legacy direct integrations retain behaviour.
+        if session.options is None:
+            try:
+                corrections = await self._llm_provider.correct_answer(
+                    current_instruction=instruction, user_message=user_message,
+                    target_language=session.profile.target_language,
+                )
+            except Exception:
+                # Feedback is auxiliary; a failed correction must not block the reply.
+                corrections = []
 
         corrections = [
             (
@@ -114,17 +149,58 @@ class DirectLearningSessionRunner:
             )
             for item in corrections
         ]
+        if session.options:
+            corrections = [item.model_copy(update={"source_message_id": user_message.id}) for item in corrections
+                           if item.original.casefold() in user_content.casefold()
+                           and item.original.casefold() != item.corrected.casefold()]
+        feedback_limit = _feedback_limit(session)
+        corrections = _dedupe_feedback_items(corrections, limit=feedback_limit)
 
-        assistant_text = await self._llm_provider.generate_reply(
-            current_instruction=instruction,
+        preparation = session.preparation
+        metadata = dict(instruction.metadata)
+        if preparation and preparation.based_on_message_count == len(session.messages):
+            try:
+                validated = validate_dialogue_preparation(preparation, material.content)
+                metadata["preparation"] = validated.model_dump(mode="json")
+            except ValueError:
+                metadata.pop("preparation", None)
+        else:
+            metadata.pop("preparation", None)
+        reply_instruction = instruction.model_copy(update={"metadata": metadata})
+        reply_kwargs = dict(
+            current_instruction=reply_instruction,
             material=material,
             message_history=[*session.messages, user_message],
             user_message=user_message,
             corrections=corrections,
             target_language=session.profile.target_language,
         )
+        started = perf_counter()
+        first_token = None
+        stream = getattr(self._llm_provider, "stream_reply", None)
+        streamed = stream is not None and getattr(self._llm_provider, "supports_streaming", True)
+        if stream:
+            parts = []
+            async for part in stream(**reply_kwargs):
+                if not part:
+                    continue
+                if first_token is None:
+                    first_token = perf_counter()
+                parts.append(part)
+                if on_delta:
+                    on_delta(part)
+            assistant_text = "".join(parts).strip()
+        else:
+            assistant_text = await self._llm_provider.generate_reply(**reply_kwargs)
+            if on_delta and assistant_text:
+                on_delta(assistant_text)
+        if not assistant_text.strip():
+            raise ValueError("对话服务未返回文字，当前发言尚未保存，请重试。")
+        timing = ReplyTiming(ttft_ms=(first_token-started)*1000 if first_token and streamed else None,
+                             total_ms=(perf_counter()-started)*1000, streamed=streamed)
 
-        assistant_message = Message(role=MessageRole.ASSISTANT, content=assistant_text)
+        assistant_message = Message(role=MessageRole.ASSISTANT, content=assistant_text,
+                                    metadata={"timing": timing.model_dump(mode="json")})
 
         updated_session = session.model_copy(
             update={
@@ -157,6 +233,7 @@ class DirectLearningSessionRunner:
             events=events,
             assistant_message=assistant_message,
             feedback_items=corrections,
+            timing=timing,
         )
 
     async def complete_session(
@@ -168,11 +245,31 @@ class DirectLearningSessionRunner:
         if session.status is SessionStatus.COMPLETED:
             return SessionStepResult(session=session, review_items=session.review_items)
 
-        review = await self._llm_provider.summarize_session(
-            session=session,
-            material=material,
-            target_language=session.profile.target_language,
-        )
+        user_messages = [m for m in session.messages if m.role is MessageRole.USER]
+        if not user_messages:
+            review = SessionReview(summary="本次尚未提交发言。可以随时围绕材料开始新的讨论。")
+        elif session.options and session.options.feedback_timing is FeedbackTiming.OFF:
+            review = SessionReview(summary=f"已完成 {len(user_messages)} 次发言，本轮未启用纠错与复习建议。")
+        else:
+            review = await self._llm_provider.summarize_session(
+                session=session, material=material,
+                target_language=session.profile.target_language,
+            )
+        if session.options:
+            grounded = []
+            for item in [*session.feedback_items, *review.feedback_items]:
+                source = next((m for m in user_messages
+                               if (item.source_message_id is None or m.id == item.source_message_id)
+                               and item.original.casefold() in m.content.casefold()), None)
+                if source and item.original.strip().casefold() != item.corrected.strip().casefold():
+                    grounded.append(item.model_copy(update={"source_message_id": source.id}))
+            feedback = _dedupe_feedback_items(grounded, limit=_feedback_limit(session))
+            ids = {m.id for m in user_messages}
+            feedback_ids = {item.id for item in feedback}
+            candidates = [item for item in review.review_items
+                          if item.source_message_id in ids or item.source_feedback_id in feedback_ids][:3]
+            review = review.model_copy(update={"feedback_items": feedback, "review_items": candidates,
+                                               "focus_areas": review.focus_areas[:3]})
         review_items = [
             item.model_copy(
                 update={
@@ -184,10 +281,7 @@ class DirectLearningSessionRunner:
         ]
         review = review.model_copy(
             update={
-                "feedback_items": [
-                    *session.feedback_items,
-                    *review.feedback_items,
-                ],
+                "feedback_items": review.feedback_items if session.options else [*session.feedback_items, *review.feedback_items],
                 "review_items": review_items,
             }
         )
@@ -237,6 +331,29 @@ def _focus_points_from_material(material: LearningMaterial) -> list[str]:
         *material.analysis.keywords,
         *[expr.text for expr in material.analysis.expressions],
     ]
+
+
+def _feedback_limit(session: PracticeSession) -> int:
+    return {"low": 1, "medium": 2, "high": 3}.get(
+        session.options.correction_intensity.value if session.options else "high", 3)
+
+
+def _dedupe_feedback_items(items: list[FeedbackItem], *, limit: int) -> list[FeedbackItem]:
+    keyed: dict[tuple[str, str], FeedbackItem] = {}
+    order: list[tuple[str, str]] = []
+    for item in items:
+        key = (_normalize_feedback_text(item.original), _normalize_feedback_text(item.corrected))
+        if key not in keyed:
+            keyed[key] = item
+            order.append(key)
+            continue
+        if keyed[key].source_message_id is None and item.source_message_id is not None:
+            keyed[key] = item
+    return [keyed[key] for key in order[:limit]]
+
+
+def _normalize_feedback_text(value: str) -> str:
+    return " ".join(value.casefold().strip().split())
 
 
 def _message_event(session_id: str, message: Message) -> SessionEvent:

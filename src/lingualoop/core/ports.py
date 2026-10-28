@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Protocol, AsyncIterator
 
 from lingualoop.core.domain import (
     FeedbackItem,
@@ -12,6 +12,9 @@ from lingualoop.core.domain import (
     SessionReview,
     PracticeSession,
     SessionEvent,
+    DiscussionTopic,
+    PracticeOptions,
+    DialoguePreparation,
 )
 
 
@@ -34,6 +37,8 @@ class LearningLLMProvider(Protocol):
         material: LearningMaterial,
         learner_level: ProficiencyLevel,
         target_language: LanguageEnum,
+        topic: DiscussionTopic | None = None,
+        options: PracticeOptions | None = None,
     ) -> str: ...
 
     async def generate_reply(
@@ -46,6 +51,13 @@ class LearningLLMProvider(Protocol):
         corrections: list[FeedbackItem],
         target_language: LanguageEnum,
     ) -> str: ...
+
+    def stream_reply(self, **kwargs) -> AsyncIterator[str]: ...
+
+    async def prepare_custom_topic(self, *, material: LearningMaterial, title: str,
+                                   target_language: LanguageEnum, native_language: LanguageEnum) -> DiscussionTopic: ...
+
+    async def prepare_dialogue(self, *, material: LearningMaterial, session: PracticeSession) -> DialoguePreparation: ...
 
     async def correct_answer(
         self,

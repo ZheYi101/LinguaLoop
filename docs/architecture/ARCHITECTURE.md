@@ -1,8 +1,49 @@
 # Architecture
 
+## 本地缓存与可恢复历史（2026-10-28）
+
+继续采用标准库 SQLite，无独立缓存服务、ORM 或云数据库。按操作连接和事务适配后台 worker，启用 WAL。新增 `preparation_cache` 表（键、原文哈希、更新时间、分析 payload）及按材料/更新时间的会话索引，启动时幂等创建，旧 JSON 通过默认值兼容读取。
+
+应用层生成缓存键：原文 SHA256、标题、源语言、完整学习 profile、provider 公开身份、准备格式版本。OpenAI-compatible 身份仅包含服务地址与推理模型，不含 API Key；轮换密钥或切换 Flash 不使整书准备失效。`LearningMaterial.analysis_cache_key` 关联已使用缓存，旧数据默认空。完整缓存优先于部分进度，部分缓存按位置/哈希合并。重复导入匹配原材料 ID，复用资料和最近会话；不完整结果等待显式继续整理。
+
+历史按材料查询全部线程，选择旧会话同时恢复材料/profile/runtime，不更新业务时间。完成线程只读。启动恢复最近材料与会话，QML 直接展示会话页；线程草稿仅在 ViewModel 内存保留。确认发送的用户与完整助手回复由同一 runner 保存，预测不作为消息。无 AI 配置时使用明确报错的只读 provider，不能清空已有准备，也不产生模拟回复。
+
+实机探针 `scripts/desktop_session_probe.py` 以可见 Windows 窗口、正常应用数据库和 Qt 输入事件验证，不直接写入对话。开发 mock 测试使用独立临时库。一般模型调用默认 240 秒 wall deadline，整书汇总单独 600 秒，后台预测仍有 45 秒外层截止，前台 Flash 不等待整理。
+
+## 2026-10-28 整本小说验证增量
+
+用户提供真实长篇 EPUB 后，材料准备采用分段索引和整书汇总两层。120000 字符以内仍每段最多 12000 字符，长篇每段最多 24000 字符；默认材料预算提升至 1000000 字符。真实 provider 默认并发 3 段，可用 `LINGUALOOP_PREPARATION_CONCURRENCY` 设置 1–4。每段 Pro 使用 thinking+low、16000 tokens（明确截断时仅再以 24000 重试一次），生成简短概要、事件、人物和 2 个有来源的话题；随后 Pro 以全部有序段落笔记做 low/24000 的整书汇总（明确截断时最多以 32000 重试一次），贯通开头、中段和结局、合并人物并生成跨章节话题。最终最多 60 题，整书题优先，其余按章节轮询。
+
+段落可乱序完成，持久化按原文位置排序；失败会取消仍在运行的段落请求。重试按边界和内容哈希复用已完成段落及其稳定 ID。整书汇总失败保留所有段落并保持 `preparation_complete=False`；成功后新增 `overview_complete=True`。全部段落未变且整书汇总已完成时可复用概要；旧数据该字段默认 False。取消已发送请求不代表供应商停止计费。
+
+Flash 的实时上下文新增本地 `dialogue_knowledge`：只在预先保存的段落话题、要点、人物和引文中按当前发言及近期线程选参考，不在前台调用 Pro 或扫描整本原文。词匹配仍会漏掉转述，因此稳定背景另外包含整书概要、大纲和最多 48 段的简短章节索引；超过时均匀抽样并标明范围。本次 30 段全部包含。稳定背景放在动态资料前，便于兼容服务复用 prompt 前缀缓存。保留最近十条消息及少量早期读者观点；观点明确标为历史，当前改口优先。后台小任务也选择当前交流相关的准备资料，避免一直拿原话题第一个分支。回答倾向两句，具体回应读者的疑问或异议，不强制每轮提问。首字、完整模型回复和应用端到端计时必须区分，1 秒仍是优化目标。
+
+真实整书调用与读者式讨论使用 `scripts/validate_novel.py`，显式要求 `--real` 和 `RUN_REAL_AI_TESTS=1`。本地数据库含原文和确认的会话，必须放在忽略目录；报告只记录覆盖和运行元数据。当前验收结论见 Roadmap 与后续真实小说验收记录。
+
+## 2026-10-24 文本优先增量
+
+当前阶段先独立验收纯文本，再实现 LiveKit 连续语音；既有 Qt 分轮语音保持可用但不作为此阶段的验证前提。主要业务入口为材料和对话。
+
+- `application/material_preparation.py` 按不超过 12000 字符分块处理全材料，按块保存结构化结果与 SHA256，失败后重试复用同语言配置和相同哈希的块。默认 360000 字符预算由 `LINGUALOOP_MAX_MATERIAL_CHARS` 配置，超限显式提示分卷且先保存原文。
+- `MaterialAnalysis` 扩展 `outline/characters/chunks/preparation_complete`，`DiscussionTopic` 扩展 `category/answer_branches`，保持旧 JSON 默认值兼容。分支包含可能的用户意图、回答要点、建议短回复、追问和精确原文引用。最终话题预算 60，按章节轮询保留。
+- 自定义话题从全部块 payload、摘要和已保存原文按词/日中字符 n-gram 相关性挑选，提取命中附近 600 字符窗口，并附均匀分布的全书概览；明确 selected chunk 标识、起止位置和概览是否抽样。新话题 `source_chunk_ids` 保存引用的章节来源，不借前 60 话题代表全书细节。
+- `OpenAICompatibleLLMProvider` 将 Pro 思考角色与 Flash 非思考角色显式拆开。DeepSeek 的全局旧 `DISABLE_THINKING` 只影响对话默认值；原始推理链不进入数据库或 UI。
+- 前台 `stream_reply` 仅调用 Flash，收到内容块通过回调进入 UI，不把整本原文传入每轮；使用预制话题、可用预测准备和最近六条消息。Runner 只在流成功结束后提交完整消息，模型 TTFT/总时间单独存入助手消息 metadata。
+- Workbench 在单一 asyncio worker 中调度 `prepare_dialogue`。每会话上限 12 次、45 秒超时、异步锁保证一个后台推理任务；新 revision 取消旧任务并验证代际、会话标识和消息数量。预测保存在 `session.preparation`，不加入用户消息。取消后的晚到结果被丢弃；失败不阻塞 Flash。
+- 新生成结构由 core 的严格准备校验在 provider 和应用层双重检查：后台必须有非空意图、回答要点和精确来源；新材料/自定义话题必须至少有一个完整有效分支。部分无效分支剔除，全无效或缺失字段最多进行两次格式尝试；失败保留旧有效准备并显示 unavailable。历史 payload 默认空字段继续可读，不因此把无效新结果标为 ready。
+- 前台消费历史准备时再次校验；无效旧 snapshot 仍可读取，但不注入 Flash。证据通过集中数组与分支索引去重、近期消息省略持久化 UUID/重复当前发言，输出上限保持 160 tokens。后台 Pro 显式 low effort、4000 tokens，输入收缩到当前题、少量候选/要点、单引文、最近两条发言；输出单意图、至多两短要点和一个精确引用，模型输出后映射原领域结构。分析 high、24000 tokens。每次非流式调用默认 240 秒 wall deadline，单次全材料运行默认 1800 秒总预算；两者可配置，超时保留完成块。
+- DeepSeek 构造使用同一 `langchain-openai` 包的 `BaseChatOpenAI`，避免 OpenAI 专用子类将预算字段改名为 `max_completion_tokens`。真实 wire 使用官方 `max_tokens`；离线 httpx transport 验证 high/24000、low/4000 与 Flash/160 的请求体及 thinking 参数，泛 OpenAI 路由继续原适配。
+- `provider/workbench.preparation_diagnostics` 只暴露 finish_reason、tokens、耗时、失败阶段和请求预算，不含文本或 CoT。明确 length 时不重复同预算请求；其他结构失败至多两次，依然受单任务 45 秒限制。测试/有界验收可通过 settings 的 `background_max_attempts=1` 限制格式尝试，不能因此宣称线上后台已通过。
+- 新会话前台不做 Pro 纠错，结束后根据已确认用户输出汇总；历史 immediate 配置在新讨论中同样延后。旧直接 runner 无 options 的语义保持兼容。
+- 导入扩展为 EPUB、Excel XLSX（openpyxl 只读缓存值）和带同名字幕的视频。EPUB 依据 spine，视频仅读字幕，不宣称理解画面。
+
+这些是本轮实现边界，真实文本质量和完整回复低于 1 秒的性能目标仍需真实 HTTP 验证；流式首字指标不能代替完整回复性能。详见 [技术决策 0012](../decisions/TECH_DECISIONS.md)。
+
 ## 初始架构目标
 
 第一版架构应支持快速验证产品闭环，同时保留 LLM provider、存储层和前端形态的替换空间。不要为了早期 MVP 引入过重的分布式架构。
+
+当前产品主线见 [Project Brief](../product/PROJECT_BRIEF.md)：沉浸材料理解、话题选择、语音讨论与轻量复盘。已有话题和分轮语音实现；真实语音验收状态见 [初版验证记录](../planning/INITIAL_VERSION_2026-10-24.md)。下文插件注册和完整 Kernel 合约仍包含目标架构。
 
 核心和 agent kernel 采用 Python-first 方向。前端形态仍可独立选择，但领域模型、Pattern、Plugin capability、Agent Kernel 和第一批 provider adapter 应优先用 Python 编写。
 
@@ -26,6 +67,7 @@ QML UI
 
 application
   material analysis use cases
+  topic suggestions and selection
   practice session orchestration
   feedback and review generation
 
@@ -68,6 +110,7 @@ plugins
   LLM / STT / TTS providers
 
 patterns
+  topic discussion
   roleplay
   shadowing
   retell
@@ -81,6 +124,8 @@ LinguaLoop 应采用 `fixed learning core + optional plugins + capability-aware 
 
 Core 负责定义学习语义、状态机、事件日志、Pattern contract、capability contract 和结构化输出。Plugins 负责扩展可选能力，例如语音、Live2D、材料导入、LLM/STT/TTS provider。Patterns 负责组织学习流程，并通过 capability requirements 声明自己依赖哪些插件能力。插件不得绕过 core schema 直接改写用户学习数据。
 
+这里的可选表示底层实现可替换、不同 Pattern 可声明不同要求。正式 MVP 的语音讨论必须具备语音能力，不能因插件尚未接入就按文本路径宣告完成。
+
 详细设计见 [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md)。Pattern 分类见 [LEARNING_PATTERNS.md](./LEARNING_PATTERNS.md)。Core 对象和基础概念见 [CORE_CONCEPTS.md](./CORE_CONCEPTS.md)。
 
 Agent kernel 详细设计见 [AGENT_CORE_ARCHITECTURE.md](./AGENT_CORE_ARCHITECTURE.md)。
@@ -91,7 +136,17 @@ LinguaLoop 的核心 agent 不是一个自由规划的大 agent，而是一个�
 
 系统的灵活度主要放在 Pattern 层：Pattern 固定练习模式、语境、纠错强度、输入 modality、结束条件、复习项生成和复习节奏。Kernel 负责执行 Pattern、检查 capability、调用 provider、记录 `SessionEvent`，并把输出沉淀为 `FeedbackItem` 和 `ReviewItem`。
 
-默认 runtime adapter 采用 LangGraph，但 Core 不依赖 LangGraph。LangGraph 负责 stateful workflow、conditional routing、streaming 和 checkpoint / resume；LinguaLoop 自己负责领域模型、Pattern contract、capability registry、权限和事件语义。
+当前桌面与 CLI 采用 direct deterministic runner，复用原有 LangGraph adapter 作为独立实验路径；本次不迁移编排引擎。Core 不依赖 LangGraph，未来引擎可替换。LinguaLoop 自己负责领域模型、Pattern contract、capability registry、权限和事件语义。
+
+## 当前桌面执行边界
+
+- QML Material 页面 → `LearningViewModel` → `LearningWorkbench` → deterministic runner → 可替换文本 provider。
+- `core/voice.py` 定义 STT/TTS protocols，`providers/speech.py` 使用独立环境配置调用兼容音频端点，业务不依赖供应商 SDK。
+- `desktop/audio.py` 的 Qt capture/player 和所有 UI 对象留在主线程；`desktop/worker.py` 复用一个线程与 asyncio loop，通过 queued signal 交付结果并在退出时取消/释放。
+- SQLite 每个操作创建连接及事务，材料先保存再分析。会话、反馈和复习项在本地保存；QSettings 保存外观与新会话偏好。录音只保留在临时文件及内存，不进业务数据库。
+- `PracticeSession.topic/options`、`LearningMaterial.profile/subtitle_cues` 和 `MaterialAnalysis.topics` 使用兼容默认值读取旧数据；旧会话 options 为空时保留原有语义。
+
+选择与影响见 [Decision 0011](../decisions/TECH_DECISIONS.md#decision-0011-md3-桌面与独立分轮语音实现)。
 
 ## 学习材料生命周期
 
@@ -145,12 +200,14 @@ LinguaLoop 不应把“内容展示过”当成“学习者掌握了”。学习
 
 LiveKit 是 `voice-livekit` 插件的强候选 SDK，而不是项目总基座。Core 只依赖 `VoiceSessionProvider` / capability 抽象，语音插件内部处理 WebRTC、turn detection、interruption、STT-LLM-TTS pipeline、实时转录和延迟指标。依赖语音的 Pattern 只声明 `voice.session`、`stt.transcribe` 或 `tts.speak`，不直接绑定 LiveKit。
 
-第一版文本 MVP 不把语音放在关键路径，但架构应保留语音插件接入点。
+基础语音进入正式 MVP 的关键路径：材料理解与话题选择之后，用户能多轮说话并收听 AI 回复。文本保留为原型、辅助输入与故障回退；连续实时双向语音、复杂打断和更完整的遥测作为后续增强。具体 provider 和交互形式待验证，本次不新增 SDK 依赖。
+
+语音输入与回复仍进入同一学习会话和证据链。识别文本应允许用户修正，不能把识别错误直接当成语言错误；仅有 transcript 时不诊断发音，原始录音也不作为复盘的必要存储项。
 
 ## 关键用例
 
-- analyzeMaterial(material): 生成摘要、关键词、表达点和练习建议。
-- startPracticeSession(material, goal, preferences): 创建练习会话。
+- analyzeMaterial(material): 生成语境摘要、可聊话题及来源关联，按需提供关键词、表达点和练习建议。
+- startPracticeSession(material, goal, preferences): 根据所选或自提话题创建讨论会话，可显式选择 roleplay；话题与语音元数据的最终 schema 待定义。
 - continueConversation(session, userMessage): 生成下一轮 AI 回复和可选反馈。
 - summarizeSession(session): 生成复盘和 review items。
 - startReview(language, profile, reviewQueue): summary-first 地选择 1-3 个复习方向，而不是直接倾倒所有过期条目。
@@ -179,5 +236,5 @@ MVP 运行时持久化采用标准库 `sqlite3`，不引入 ORM。SQLite adapter
 - 是否从第一版就支持多 LLM provider。
 - 插件 manifest、权限模型和版本兼容策略如何设计。
 - Pattern manifest、capability requirements 和 fallback 策略如何设计。
-- `voice-livekit` 是否作为第一批官方插件实现，还是等文本闭环跑通后再实现。
+- 基础语音采用哪个 provider，以及 `voice-livekit` 候选如何满足 MVP 的延迟、成本与交互要求。
 - LangGraph adapter 在 MVP 中何时替换 direct deterministic runner。

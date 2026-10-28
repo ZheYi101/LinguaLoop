@@ -56,6 +56,70 @@ class CorrectionIntensity(StrEnum):
     HIGH = "high"
 
 
+class FeedbackTiming(StrEnum):
+    END = "end"
+    IMMEDIATE = "immediate"
+    OFF = "off"
+
+
+class PracticeMode(StrEnum):
+    DISCUSSION = "discussion"
+    ROLEPLAY = "roleplay"
+
+
+class PracticeOptions(DomainModel):
+    mode: PracticeMode = PracticeMode.DISCUSSION
+    difficulty: ProficiencyLevel = ProficiencyLevel.UNKNOWN
+    correction_intensity: CorrectionIntensity = CorrectionIntensity.LOW
+    feedback_timing: FeedbackTiming = FeedbackTiming.END
+    role_description: str = ""
+
+
+class AnswerBranch(DomainModel):
+    user_intent: str
+    response_points: list[str] = Field(default_factory=list)
+    suggested_reply: str = ""
+    follow_up: str = ""
+    source_excerpts: list[str] = Field(default_factory=list)
+
+
+class MaterialCharacter(DomainModel):
+    name: str
+    description: str = ""
+    source_excerpts: list[str] = Field(default_factory=list)
+
+
+class PreparedChunk(DomainModel):
+    id: str = Field(default_factory=lambda: new_id("chunk"))
+    start_char: int = Field(ge=0)
+    end_char: int = Field(ge=0)
+    summary: str
+    source_excerpt: str
+    content_hash: str = ""
+    analysis_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class DiscussionTopic(DomainModel):
+    id: str = Field(default_factory=lambda: new_id("topic"))
+    title: str
+    opening_question: str
+    source_excerpt: str
+    category: str = "discussion"
+    answer_branches: list[AnswerBranch] = Field(default_factory=list)
+    source_chunk_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("title", "opening_question", "source_excerpt")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        return str(_clean_required_text(value))
+
+
+class SubtitleCue(DomainModel):
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    text: str
+
+
 class MaterialSourceType(StrEnum):
     TEXT = "text"
     ARTICLE = "article"
@@ -177,6 +241,25 @@ class MaterialAnalysis(DomainModel):
     expressions: list[MaterialExpression] = Field(default_factory=list)
     difficulties: list[str] = Field(default_factory=list)
     suggested_goals: list[str] = Field(default_factory=list)
+    topics: list[DiscussionTopic] = Field(default_factory=list)
+    outline: list[str] = Field(default_factory=list)
+    characters: list[MaterialCharacter] = Field(default_factory=list)
+    chunks: list[PreparedChunk] = Field(default_factory=list)
+    preparation_complete: bool = True
+    overview_complete: bool = False
+
+
+class DialoguePreparation(DomainModel):
+    based_on_message_count: int
+    predicted_intents: list[str] = Field(default_factory=list)
+    response_points: list[str] = Field(default_factory=list)
+    source_excerpts: list[str] = Field(default_factory=list)
+
+
+class ReplyTiming(DomainModel):
+    ttft_ms: float | None = None
+    total_ms: float
+    streamed: bool = False
 
 
 class LearningMaterial(DomainModel):
@@ -191,6 +274,9 @@ class LearningMaterial(DomainModel):
     source_path: str | None = None
     normalization_status: NormalizationStatus = NormalizationStatus.RAW
     analysis: MaterialAnalysis | None = None
+    analysis_cache_key: str | None = None
+    profile: SessionUserProfile | None = None
+    subtitle_cues: list[SubtitleCue] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     imported_at: datetime = Field(default_factory=utc_now)
 
@@ -297,6 +383,10 @@ class PracticeSession(DomainModel):
     material_id: str
     pattern_id: str
     profile: SessionUserProfile
+    # None denotes a legacy session; retain its original per-turn feedback.
+    options: PracticeOptions | None = None
+    topic: DiscussionTopic | None = None
+    preparation: DialoguePreparation | None = None
     status: SessionStatus = SessionStatus.ACTIVE
     plan: PracticePlan | None = None
     messages: list[Message] = Field(default_factory=list)

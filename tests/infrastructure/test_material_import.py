@@ -41,7 +41,7 @@ def test_unsupported_import_extension_fails_without_normalizing(tmp_path) -> Non
     path = tmp_path / "lesson.pdf"
     path.write_text("not supported", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Only .md"):
+    with pytest.raises(ValueError, match="Supported materials"):
         import_material_file(path)
 
 

@@ -4,11 +4,14 @@ import argparse
 import asyncio
 import sys
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Callable, Sequence
 
+from dotenv import load_dotenv
+
 from lingualoop.application import LearningWorkbench
-from lingualoop.core.domain import LanguageEnum, ProficiencyLevel, ReviewRating
+from lingualoop.core.domain import LanguageEnum, MaterialTrack, ProficiencyLevel, ReviewRating
 from lingualoop.core.ports import LearningLLMProvider
 from lingualoop.infrastructure.material_import import import_material_file
 from lingualoop.providers import MockLearningLLMProvider, OpenAICompatibleLLMProvider
@@ -26,11 +29,11 @@ class ConsoleSessionApp:
         workbench: LearningWorkbench,
         *,
         input_fn: Callable[[str], str] = input,
-        output_fn: Callable[[str], None] = print,
+        output_fn: Callable[[str], None] | None = None,
     ) -> None:
         self._workbench = workbench
         self._input = input_fn
-        self._output = output_fn
+        self._output = output_fn or _safe_print
 
     async def run(self) -> int:
         self._output("LinguaLoop CLI")
@@ -69,7 +72,12 @@ class ConsoleSessionApp:
             if command == "finish":
                 return CommandOutcome(await self._finish())
             if command == "review":
-                return CommandOutcome(self._workbench.review_lines())
+                review_args = args.strip().lower()
+                if review_args in {"", "--due"}:
+                    return CommandOutcome(self._workbench.review_lines(due_only=True))
+                if review_args in {"--all", "all"}:
+                    return CommandOutcome(self._workbench.review_lines(due_only=False))
+                return CommandOutcome(["Usage: review [--all]"])
             if command == "rate":
                 return CommandOutcome(await self._rate(args))
             if command == "summary":
@@ -140,6 +148,19 @@ class ConsoleSessionApp:
     async def _import_material(self, path_text: str) -> list[str]:
         path = Path(path_text.strip() or self._input("File path: ").strip())
         imported = import_material_file(path)
+        self._output("Normalized preview:")
+        for line in _preview_lines(imported.normalized_content):
+            self._output(line)
+        self._output("Raw content is preserved separately.")
+
+        title = self._input(f"Title [{imported.title}]: ").strip() or imported.title
+        track = _prompt_enum(
+            self._input,
+            self._output,
+            "Track (article_reading/live_chat) [article_reading]: ",
+            MaterialTrack,
+            default=MaterialTrack.ARTICLE_READING,
+        )
         source_language = _prompt_enum(
             self._input,
             self._output,
@@ -166,13 +187,16 @@ class ConsoleSessionApp:
         )
         material = await self._workbench.load_imported_material(
             imported,
+            title=title,
             source_language=source_language,
             target_language=target_language,
             native_language=native_language,
             learner_level=learner_level,
+            track=track,
         )
         return [
             f"Imported: {material.title}",
+            f"Track: {material.track.value}",
             *imported.diagnostics,
             *self._workbench.overview_lines(),
             "Type 'start' to open the practice session.",
@@ -242,7 +266,8 @@ def _help_lines() -> list[str]:
         "  start   Start the practice session",
         "  say     Send a learner message",
         "  finish  Complete the session and create review items",
-        "  review  Show review items",
+        "  review  Show due review items",
+        "  review --all  Show all active review items",
         "  rate    Record review outcome",
         "  summary Show material/session summary",
         "  export  Save session JSON",
@@ -264,10 +289,14 @@ def _prompt_enum(
     input_fn: Callable[[str], str],
     output_fn: Callable[[str], None],
     prompt: str,
-    enum_cls: type[LanguageEnum] | type[ProficiencyLevel],
-) -> LanguageEnum | ProficiencyLevel:
+    enum_cls: type[StrEnum],
+    *,
+    default: StrEnum | None = None,
+) -> StrEnum:
     while True:
         raw = input_fn(prompt).strip()
+        if not raw and default is not None:
+            return default
         try:
             return _parse_enum(raw, enum_cls)
         except ValueError as exc:
@@ -275,8 +304,8 @@ def _prompt_enum(
 
 
 def _parse_enum(
-    raw: str, enum_cls: type[LanguageEnum] | type[ProficiencyLevel]
-) -> LanguageEnum | ProficiencyLevel:
+    raw: str, enum_cls: type[StrEnum]
+) -> StrEnum:
     candidate = raw.strip().lower()
     if not candidate:
         raise ValueError("value must not be blank")
@@ -296,13 +325,56 @@ def _read_multiline(input_fn: Callable[[str], str]) -> str:
     return "\n".join(lines).strip()
 
 
+def _preview_lines(text: str, *, max_lines: int = 8, max_chars: int = 800) -> list[str]:
+    preview = text.strip()[:max_chars]
+    lines = preview.splitlines()[:max_lines]
+    if len(text.strip()) > len(preview) or len(text.strip().splitlines()) > max_lines:
+        lines.append("...")
+    return [f"  {line}" if line else "" for line in lines] or ["  (empty)"]
+
+
+def _configure_console_encoding() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            continue
+
+
+def _safe_print(text: str, *, file=None) -> None:
+    stream = file or sys.stdout
+    try:
+        print(text, file=stream)
+        return
+    except UnicodeEncodeError:
+        pass
+
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is not None:
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+            print(text, file=stream)
+            return
+        except (AttributeError, UnicodeEncodeError, ValueError, OSError):
+            pass
+
+    encoding = getattr(stream, "encoding", None) or sys.getdefaultencoding()
+    safe_text = str(text).encode(encoding, errors="replace").decode(encoding, errors="replace")
+    print(safe_text, file=stream)
+
+
 def build_provider(use_mock: bool) -> LearningLLMProvider:
+    load_dotenv(dotenv_path=Path.cwd() / ".env")
     if use_mock:
         return MockLearningLLMProvider()
     return OpenAICompatibleLLMProvider.from_env()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_console_encoding()
     parser = argparse.ArgumentParser(description="LinguaLoop CLI")
     parser.add_argument("--mock", action="store_true", help="Use the deterministic mock provider")
     args = parser.parse_args(argv)
@@ -310,7 +382,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         provider = build_provider(args.mock)
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _safe_print(f"Error: {exc}", file=sys.stderr)
         return 2
     app = ConsoleSessionApp(LearningWorkbench(provider))
     return asyncio.run(app.run())

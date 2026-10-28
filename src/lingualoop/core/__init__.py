@@ -1,6 +1,12 @@
 """Core domain models and ports for LinguaLoop."""
 
 from lingualoop.core.domain import (
+    AnswerBranch, MaterialCharacter, PreparedChunk, DialoguePreparation, ReplyTiming,
+    DiscussionTopic,
+    PracticeOptions,
+    PracticeMode,
+    FeedbackTiming,
+    SubtitleCue,
     CapabilityRequirement,
     CorrectionIntensity,
     FeedbackItem,
@@ -36,6 +42,12 @@ from lingualoop.core.domain import (
 from lingualoop.core.ports import EventStore, LearningLLMProvider
 
 __all__ = [
+    "AnswerBranch", "MaterialCharacter", "PreparedChunk", "DialoguePreparation", "ReplyTiming",
+    "DiscussionTopic",
+    "PracticeOptions",
+    "PracticeMode",
+    "FeedbackTiming",
+    "SubtitleCue",
     "CapabilityRequirement",
     "CorrectionIntensity",
     "EventStore",

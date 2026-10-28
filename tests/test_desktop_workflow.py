@@ -1,0 +1,639 @@
+"""Qt event-loop and real QML interaction checks; speech transport is synthetic."""
+from __future__ import annotations
+
+import asyncio
+import io
+import os
+from pathlib import Path
+from time import monotonic
+import wave
+
+import pytest
+
+pytest.importorskip("PySide6")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_QUICK_BACKEND", "software")
+
+from PySide6.QtCore import QObject, QPointF, QSettings, Qt, Signal, QThread
+from PySide6.QtGui import QFontDatabase, QGuiApplication
+from PySide6.QtQuick import QQuickItem, QQuickWindow
+from PySide6.QtTest import QTest
+
+from lingualoop.application import LearningWorkbench
+from lingualoop.desktop.app import create_engine
+from lingualoop.desktop.preferences import DesktopPreferences
+from lingualoop.desktop.viewmodel import LearningViewModel
+from lingualoop.infrastructure import SQLiteStore
+from lingualoop.providers import MockLearningLLMProvider
+
+
+def pcm_wav():
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(b"\x10\x00\xf0\xff" * 800)
+    return output.getvalue()
+
+
+class FakeAudio(QObject):
+    recorded = Signal(bytes)
+    errorOccurred = Signal(str)
+    stateChanged = Signal(str)
+    durationChanged = Signal(int)
+    devicesChanged = Signal()
+    input_devices = [{"id": "input", "name": "Test microphone"}]
+    output_devices = [{"id": "output", "name": "Test speaker"}]
+
+    def __init__(self):
+        super().__init__()
+        self.plays = 0
+        self.cleared = False
+        self.fail_play = False
+
+    def start_recording(self):
+        self.stateChanged.emit("recording")
+        self.durationChanged.emit(1)
+
+    def stop_recording(self):
+        self.recorded.emit(pcm_wav())
+
+    def cancel_recording(self):
+        self.stateChanged.emit("idle")
+
+    def play(self, audio):
+        assert audio == pcm_wav()
+        if self.fail_play:
+            self.fail_play = False
+            self.stateChanged.emit("error")
+            self.errorOccurred.emit("播放失败，文字回复已保留。")
+        else:
+            self.plays += 1
+            self.stateChanged.emit("playing")
+
+    def stop_playback(self):
+        self.stateChanged.emit("idle")
+
+    def clear(self):
+        self.cleared = True
+        self.stateChanged.emit("idle")
+
+
+class FakeSpeech:
+    def __init__(self):
+        self.transcriptions = self.syntheses = 0
+        self.fail_stt = self.fail_tts = False
+        self.loops = []
+
+    async def transcribe(self, audio):
+        self.loops.append(asyncio.get_running_loop())
+        self.transcriptions += 1
+        await asyncio.sleep(0.01)
+        if self.fail_stt:
+            self.fail_stt = False
+            raise RuntimeError("识别服务暂不可用。")
+        return "昨日は友達に会いました。"
+
+    async def synthesize(self, text):
+        self.loops.append(asyncio.get_running_loop())
+        self.syntheses += 1
+        await asyncio.sleep(0.01)
+        if self.fail_tts:
+            self.fail_tts = False
+            raise RuntimeError("合成服务暂不可用。")
+        return pcm_wav()
+
+
+class TrackedProvider(MockLearningLLMProvider):
+    def __init__(self):
+        self.loops = []
+        self.reply_calls = 0
+        self.fail_reply = False
+
+    async def analyze_material(self, **kwargs):
+        self.loops.append(asyncio.get_running_loop())
+        return await super().analyze_material(**kwargs)
+
+    async def generate_reply(self, **kwargs):
+        self.loops.append(asyncio.get_running_loop())
+        self.reply_calls += 1
+        await asyncio.sleep(0.02)
+        if self.fail_reply:
+            self.fail_reply = False
+            raise RuntimeError("回复服务暂不可用。")
+        return await super().generate_reply(**kwargs)
+
+    async def stream_reply(self, **kwargs):
+        reply = await self.generate_reply(**kwargs)
+        for position in range(0, len(reply), 8):
+            yield reply[position:position + 8]
+            await asyncio.sleep(0.02)
+
+
+@pytest.fixture(scope="module")
+def qt_app():
+    app = QGuiApplication.instance() or QGuiApplication(["lingualoop-interaction-test"])
+    if os.name == "nt":
+        for name in ("msyh.ttc", "msyhbd.ttc", "YuGothR.ttc"):
+            QFontDatabase.addApplicationFont(str(Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / name))
+    return app
+
+
+def until(predicate, timeout=5000):
+    deadline = monotonic() + timeout / 1000
+    while not predicate() and monotonic() < deadline:
+        QTest.qWait(20)
+    assert predicate()
+
+
+def item(window, name):
+    result = window.findChild(QQuickItem, name)
+    if result is None:
+        pending = [window.contentItem()]
+        while pending:
+            candidate = pending.pop()
+            if candidate.objectName() == name:
+                result = candidate
+                break
+            pending.extend(candidate.childItems())
+    assert result is not None, name
+    return result
+
+
+def click(window, name, *, scroll=None):
+    target = item(window, name)
+    if scroll:
+        view = item(window, scroll)
+        flick = view.property("contentItem")
+        # Scroll against the live, polished geometry. A first data notification
+        # can change card heights after the first requested content position.
+        for _ in range(5):
+            target = item(window, name)
+            y = target.mapToItem(flick, QPointF()).y() + flick.property("contentY")
+            flick.setProperty("contentY", max(0, min(y - 16, flick.property("contentHeight") - flick.height())))
+            QTest.qWait(60)
+            target = item(window, name)
+            viewport_point = target.mapToItem(view, QPointF(target.width() / 2, target.height() / 2))
+            if 0 <= viewport_point.x() < view.width() and 0 <= viewport_point.y() < view.height():
+                break
+        assert 0 <= viewport_point.x() < view.width() and 0 <= viewport_point.y() < view.height(), (name, viewport_point)
+    # Qt Quick polishes Flow/Layout geometry asynchronously, including when a
+    # record action changes the visible controls. Wait for a stable hit point.
+    previous_geometry = None
+    stable = 0
+    for _ in range(12):
+        target = item(window, name)
+        center = target.mapToScene(QPointF(target.width() / 2, target.height() / 2)).toPoint()
+        geometry = (center.x(), center.y(), target.width(), target.height())
+        stable = stable + 1 if geometry == previous_geometry else 0
+        if stable >= 2:
+            break
+        previous_geometry = geometry
+        QTest.qWait(20)
+    assert stable >= 2, (name, "Control geometry did not settle")
+    assert target.isVisible(), name
+    assert target.isEnabled(), name
+    point = target.mapToScene(QPointF(target.width() / 2, target.height() / 2)).toPoint()
+    assert 0 <= point.x() < window.width() and 0 <= point.y() < window.height(), (name, point)
+    QTest.mouseMove(window, point)
+    QTest.qWait(20)
+    # Hover processing may deliver a pending layout polish; press the current
+    # center rather than a coordinate measured before that event processing.
+    target = item(window, name)
+    point = target.mapToScene(QPointF(target.width() / 2, target.height() / 2)).toPoint()
+    QTest.mousePress(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    QTest.qWait(20)
+    try:
+        assert target.property("down"), (name, "The actual control did not receive the mouse press", point,
+                                         target.mapToScene(QPointF(target.width() / 2, target.height() / 2)))
+    finally:
+        QTest.mouseRelease(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    QTest.qWait(30)
+
+
+@pytest.fixture
+def desktop(qt_app, tmp_path, monkeypatch):
+    monkeypatch.setenv("LINGUALOOP_KIRIGAMI_MODE", "off")
+    provider, speech, audio = TrackedProvider(), FakeSpeech(), FakeAudio()
+    database = tmp_path / "workflow.sqlite3"
+    workbench = LearningWorkbench(provider, event_store=SQLiteStore(database))
+    prefs = DesktopPreferences(QSettings(str(tmp_path / "preferences.ini"), QSettings.Format.IniFormat))
+    vm = LearningViewModel(workbench, "Mock 调试", preferences=prefs,
+                           stt_provider=speech, tts_provider=speech, audio_controller=audio)
+    engine = create_engine(vm, window_settings=QSettings(str(tmp_path / "window.ini"), QSettings.Format.IniFormat))
+    window = engine.rootObjects()[0]
+    window.setProperty("width", 1180)
+    window.setProperty("height", 900)
+    window.requestActivate()
+    QTest.qWait(50)
+    scaffold = next(obj for obj in window.findChildren(QObject) if obj.metaObject().indexOfProperty("currentPage") >= 0)
+    try:
+        yield vm, window, scaffold, provider, speech, audio, database
+    finally:
+        vm.close()
+        assert not vm._worker._thread or not vm._worker._thread.is_alive()
+        assert audio.cleared
+        window.close()
+        engine.deleteLater()
+        qt_app.processEvents()
+
+
+def load_and_start(vm, window):
+    vm.loadMaterial("放課後の約束", "放課後、二人は喫茶店で話した。離れても友達でいようと約束した。",
+                    "japanese", "japanese", "chinese", "B1")
+    until(lambda: not vm.busy)
+    assert len(vm.topics) >= 8
+    QTest.qWait(30)
+    click(window, "selectTopic1", scroll="materialScroll")
+    assert vm.selectedTopicId == vm.topics[1]["id"]
+    click(window, "startDiscussionButton", scroll="materialScroll")
+    until(lambda: vm.sessionActive and not vm.busy)
+
+
+def test_service_balance_error_is_actionable_and_saved_material_survives(desktop):
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    class BalanceError(Exception):
+        status_code = 402
+    async def fail(**kwargs):
+        raise BalanceError('PRIVATE_PROVIDER_BODY_MUST_NOT_BE_SHOWN')
+    provider.analyze_material = fail
+    vm.loadMaterial('Book', 'Two friends met at the station.', 'english', 'english', 'chinese', 'B1')
+    until(lambda: not vm.busy)
+    assert '402' in vm.errorMessage and '余额不足' in vm.errorMessage
+    assert 'PRIVATE_PROVIDER' not in vm.errorMessage
+    assert vm.hasMaterial and vm.materialTitle == 'Book'
+    assert SQLiteStore(database).list_materials()[0].content == 'Two friends met at the station.'
+
+
+def test_long_novel_summary_can_expand_without_hiding_status_by_default(desktop):
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    analyze = provider.analyze_material
+    async def long_summary(**kwargs):
+        result = await analyze(**kwargs)
+        return result.model_copy(update={'summary': '段落摘要，包含已经读过的故事和人物。' * 200})
+    provider.analyze_material = long_summary
+    vm.loadMaterial('Novel', 'Two friends met at the station.', 'english', 'english', 'chinese', 'B1')
+    until(lambda: not vm.busy)
+    QTest.qWait(300)
+    summary = item(window, 'materialSummaryText')
+    height = summary.height()
+    assert summary.property('maximumLineCount') == 7 and height < 230
+    click(window, 'expandMaterialSummaryButton', scroll='materialScroll')
+    QTest.qWait(150)
+    assert summary.height() > height
+    click(window, 'expandMaterialSummaryButton', scroll='materialScroll')
+    QTest.qWait(150)
+    assert summary.property('maximumLineCount') == 7
+
+
+def test_empty_history_dialog_has_an_opaque_readable_surface(desktop):
+    vm, window, scaffold, *_ = desktop
+    click(window, 'nav1')
+    click(window, 'openHistoryButton')
+    QTest.qWait(250)
+    dialog = window.findChild(QObject, 'sessionHistoryDialog')
+    background = dialog.property('background')
+    point = background.mapToScene(QPointF(background.width()/2, background.height()/2))
+    snapshot = window.grabWindow()
+    scale = snapshot.width()/window.width()
+    # Empty central area must show the dialog surface, never the dimmed page beneath.
+    assert snapshot.pixelColor(round(point.x()*scale), round(point.y()*scale)) == background.property('color')
+
+
+def test_topic_browsing_groups_provider_synonyms_into_a_small_vocabulary():
+    from lingualoop.desktop.viewmodel import _topic_category_label
+    assert {_topic_category_label(value) for value in ['narrative reliability', 'Narrator reliability and obsession',
+        'narration, character motivation', '叙事可靠性', 'author\'s defense', 'literary criticism']} == {'叙述与文体'}
+    assert _topic_category_label('relationships, choices, consequences') == '人物关系'
+    assert _topic_category_label('character motivation') == '人物'
+    assert _topic_category_label('ending') == '故事与情节'
+    assert _topic_category_label('a previously unseen category') == '综合讨论'
+
+
+def test_history_dialog_switches_actual_threads_and_preserves_drafts(desktop):
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    vm._stt = vm._tts = None
+    load_and_start(vm, window)
+    item(window, 'messageInput').setProperty('text', 'First reader view.')
+    click(window, 'sendMessageButton')
+    until(lambda: not vm.busy)
+    first_id = vm._workbench.session.id
+    click(window, 'finishDiscussionButton')
+    until(lambda: not vm.busy)
+    click(window, 'nav0')
+    click(window, 'selectTopic2', scroll='materialScroll')
+    click(window, 'startDiscussionButton', scroll='materialScroll')
+    until(lambda: not vm.busy and vm.sessionActive)
+    item(window, 'messageInput').setProperty('text', 'Second reader view.')
+    click(window, 'sendMessageButton')
+    until(lambda: not vm.busy)
+    second_id = vm._workbench.session.id
+    vm.draft = 'Unsent second thought.'
+    click(window, 'openHistoryButton')
+    QTest.qWait(200)
+    click(window, 'openSession1', scroll='historyScroll')
+    until(lambda: not window.findChild(QObject, 'sessionHistoryDialog').property('visible'))
+    assert vm._workbench.session.id == first_id and not vm.sessionActive
+    assert any(message['content'] == 'First reader view.' for message in vm.messages)
+    assert not item(window, 'sendMessageButton').isEnabled()
+    vm.draft = 'Unsent first thought.'
+    click(window, 'openHistoryButton')
+    QTest.qWait(200)
+    click(window, 'openSession0', scroll='historyScroll')
+    until(lambda: not window.findChild(QObject, 'sessionHistoryDialog').property('visible'))
+    assert vm._workbench.session.id == second_id and vm.sessionActive
+    assert vm.draft == 'Unsent second thought.' and len(vm.sessionHistory) == 2
+
+
+def test_qml_three_voice_turns_retries_and_restart(desktop):
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    load_and_start(vm, window)
+    callbacks = []
+    vm.messageSent.connect(lambda: callbacks.append(QThread.currentThread()))
+    assert scaffold.property("currentPage") == 1
+    speech.fail_stt = True
+    for turn in range(3):
+        click(window, "recordButton")
+        assert vm.voiceState == "recording"
+        assert vm.recordingSeconds == 1
+        click(window, "recordButton")
+        until(lambda: not vm.busy)
+        if turn == 0:
+            assert vm.errorMessage and vm.canRetryTranscription
+            vm.retryOperation()
+            until(lambda: not vm.busy)
+        assert "友達" in vm.draft
+        edited = f"昨日は友達に会いました。{turn + 1}回目の話です。"
+        item(window, "messageInput").setProperty("text", edited)
+        assert vm.draft == edited
+        if turn == 1:
+            speech.fail_tts = True
+        click(window, "sendMessageButton")
+        vm.sendMessage(edited)  # A second submission while busy must be ignored.
+        until(lambda: not vm.busy)
+        assert len(vm.messages) == 1 + 2 * (turn + 1)
+        assert vm.draft == ""
+        if turn == 1:
+            assert vm.errorMessage
+            calls = provider.reply_calls
+            vm.retryOperation()
+            until(lambda: not vm.busy)
+            assert provider.reply_calls == calls
+        assert vm.voiceState == "playing"
+    assert provider.reply_calls == 3
+    assert speech.transcriptions == 4
+    assert speech.syntheses == 5  # Opening + 3 turns + the failed synthesis.
+    assert len({id(loop) for loop in provider.loops + speech.loops}) == 1
+    assert len(callbacks) == 3 and all(thread == QGuiApplication.instance().thread() for thread in callbacks)
+    click(window, "finishDiscussionButton")
+    until(lambda: not vm.busy)
+    assert not vm.sessionActive and scaffold.property("currentPage") == 2
+    assert vm.reviewSummary and not vm.canRetryTranscription
+    restored = LearningWorkbench(MockLearningLLMProvider(), event_store=SQLiteStore(database))
+    assert restored.session.status.value == "completed"
+    assert len(restored.session.messages) == 7
+    assert restored.session.topic.id == vm.selectedTopicId
+    assert "audio" not in restored.session.model_dump_json()
+
+
+def test_resizing_theme_keyboard_and_draft_survive(desktop):
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    load_and_start(vm, window)
+    draft = "長い日本語の草稿。" * 30 + "\n中文输入也保留。"
+    vm.draft = draft
+    topic = vm.topicTitle
+    for theme in ("light", "dark", "system"):
+        vm.preferences.setValue("themeMode", theme)
+        for width in (360, 600, 800, 1180, 1440):
+            window.setProperty("width", width)
+            window.setProperty("height", 800)
+            QTest.qWait(30)
+            assert scaffold.property("compact") == (width < 600)
+            assert scaffold.property("showContext") == (width >= 1200)
+            assert vm.draft == draft and vm.topicTitle == topic
+            for name in ("recordButton", "sendMessageButton", "finishDiscussionButton"):
+                button = item(window, name)
+                assert button.height() >= 48 and button.width() >= 48
+                point = button.mapToScene(QPointF(button.width(), button.height()))
+                assert point.x() <= width and point.y() <= 800
+            # The filled send action must use its paired contrast color.
+            send = item(window, "sendMessageButton")
+            color = send.property("contentColor")
+            background = send.property("background").property("color")
+            def luminance(value):
+                channels = (value.redF(), value.greenF(), value.blueF())
+                rgb = [part / 12.92 if part <= 0.04045 else ((part + 0.055) / 1.055) ** 2.4 for part in channels]
+                return sum(part * weight for part, weight in zip(rgb, (0.2126, 0.7152, 0.0722)))
+            lighter, darker = sorted((luminance(color), luminance(background)), reverse=True)
+            assert (lighter + 0.05) / (darker + 0.05) >= 4.5
+            assert not window.grabWindow().isNull()
+    # A navigation round trip keeps the same editor; keyboard focus remains usable.
+    click(window, "nav0")
+    click(window, "nav1")
+    editor = item(window, "messageInput")
+    editor.forceActiveFocus()
+    QTest.keyClick(window, Qt.Key.Key_End)
+    QTest.keyClick(window, Qt.Key.Key_X)
+    assert "x" in vm.draft.lower()
+    assert scaffold.property("currentPage") == 1
+    assert len(vm.messages) == 1
+
+
+def test_reply_retry_preserves_confirmed_messages_and_playback_retry(desktop):
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    load_and_start(vm, window)
+    provider.fail_reply = True
+    vm.draft = "昨日、友達に会いました。"
+    click(window, "sendMessageButton")
+    until(lambda: not vm.busy)
+    assert vm.errorMessage and vm.draft and len(vm.messages) == 1
+    audio.fail_play = True
+    vm.retryOperation()
+    until(lambda: not vm.busy)
+    assert len(vm.messages) == 3 and vm.draft == ""
+    calls, syntheses = provider.reply_calls, speech.syntheses
+    assert vm.errorMessage
+    vm.retryOperation()
+    assert vm.voiceState == "playing"
+    assert provider.reply_calls == calls and speech.syntheses == syntheses
+    vm.stopPlayback()
+    assert vm.voiceState == "idle"
+    vm.startRecording()
+    vm.cancelRecording()
+    assert vm.voiceState == "idle" and not vm.canRetryTranscription
+
+
+def test_audio_controller_temporary_files_and_timer(qt_app):
+    from lingualoop.desktop.audio import AudioController
+    from PySide6.QtMultimedia import QMediaRecorder
+
+    audio = AudioController()
+    directory = audio._dir()
+    path = directory / "recording.wav"
+    path.write_bytes(pcm_wav())
+    received = []
+    audio.recorded.connect(received.append)
+    audio._pending_recording = True
+    audio._recording_state(QMediaRecorder.RecorderState.StoppedState)
+    assert received == [pcm_wav()]
+    assert not path.exists() and audio._timer.interval() == 60000
+    audio.clear()
+    assert not directory.exists() and not audio._timer.isActive()
+
+
+def test_text_streaming_categories_custom_topic_and_shortcut(desktop):
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    # Text development does not need audio configuration.
+    vm._stt = vm._tts = None
+    vm.uiChanged.emit()
+    vm.loadMaterial("放課後の約束", "放課後、二人は喫茶店で話した。離れても友達でいようと約束した。",
+                    "japanese", "japanese", "chinese", "B1")
+    until(lambda: not vm.busy)
+    assert len(vm.topics) >= 8 and vm.materialPrepared
+    click(window, "topicCategory1", scroll="materialScroll")
+    assert len(vm.filteredTopics) < len(vm.topics)
+    click(window, "topicReference0", scroll="materialScroll")
+    assert item(window, "topicReference0").property("text") == "收起"
+    vm.topicSearch = "不存在的标题"
+    assert vm.filteredTopics == []
+    vm.topicSearch = ""
+    click(window, "discussionOptionsButton", scroll="materialScroll")
+    custom = item(window, "customTopicInput")
+    custom.forceActiveFocus()
+    for character in "friendship choices":
+        QTest.keyClick(window, Qt.Key(ord(character.upper())))
+    assert vm.customTopic == "friendship choices"
+    custom_title = vm.customTopic
+    original_prepare = provider.prepare_custom_topic
+    async def delayed_prepare(**kwargs):
+        await asyncio.sleep(0.6)
+        return await original_prepare(**kwargs)
+    provider.prepare_custom_topic = delayed_prepare
+    click(window, "startDiscussionButton", scroll="materialScroll")
+    until(lambda: vm.busy)
+    assert scaffold.property('currentPage') == 0
+    until(lambda: vm.sessionActive and not vm.busy)
+    assert scaffold.property('currentPage') == 1
+    assert vm.topicTitle == custom_title
+    assert any(topic["title"] == custom_title for topic in vm.topics)
+    assert not item(window, "recordButton").isVisible()
+    vm.draft = "私なら友達の選択を応援します。"
+    editor = item(window, "messageInput")
+    editor.forceActiveFocus()
+    QTest.keyClick(window, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    until(lambda: bool(vm.streamingText))
+    assert vm.busy and vm.pendingUserText and len(vm.messages) == 1
+    assert item(window, "streamingReplyCard").isVisible()
+    assert item(window, "streamingReplyText").property("text") == vm.streamingText
+    until(lambda: not vm.busy)
+    assert len(vm.messages) == 3 and not vm.streamingText and not vm.pendingUserText
+    assert "首字" in vm.responseTiming and "完整回复" in vm.responseTiming
+    until(lambda: "已准备" in vm.preparationStatus)
+    QTest.keyClick(window, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
+    until(lambda: scaffold.property("currentPage") == 0)
+    QTest.keyClick(window, Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
+    until(lambda: scaffold.property("currentPage") == 1)
+
+
+def test_frameless_controls_and_window_geometry(desktop):
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    assert window.flags() & Qt.WindowType.FramelessWindowHint
+    click(window, "nav3")
+    assert scaffold.property("currentPage") == 3
+    click(window, "nav2")
+    assert scaffold.property("currentPage") == 2
+    click(window, "nav0")
+    assert all(item(window, "resize_" + edge).isVisible() for edge in
+               ("top", "bottom", "left", "right", "topLeft", "topRight", "bottomLeft", "bottomRight"))
+    before = window.geometry()
+    click(window, "windowMaximizeButton")
+    until(lambda: window.windowState() == Qt.WindowState.WindowMaximized)
+    assert not item(window, "resize_top").isVisible()
+    click(window, "windowMaximizeButton")
+    until(lambda: window.windowState() == Qt.WindowState.WindowNoState)
+    assert window.geometry() == before
+    QTest.keyClick(window, Qt.Key.Key_F10, Qt.KeyboardModifier.AltModifier)
+    assert window.windowState() == Qt.WindowState.WindowMaximized
+    QTest.keyClick(window, Qt.Key.Key_F10, Qt.KeyboardModifier.AltModifier)
+    assert window.windowState() == Qt.WindowState.WindowNoState
+    click(window, "windowMinimizeButton")
+    assert window.windowState() == Qt.WindowState.WindowMinimized
+    window.showNormal()
+    window.requestActivate()
+    assert window.windowState() == Qt.WindowState.WindowNoState
+    click(window, "secondaryMenuButton")
+    QTest.keyClick(window, Qt.Key.Key_Escape)
+    click(window, "windowCloseButton")
+    assert not window.isVisible()
+
+
+def test_material_poll_does_not_destroy_pressed_category(desktop):
+    """The first post-import polling tick may arrive between press and release."""
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    vm._preparation_timer.stop()
+    vm.loadMaterial("Polling race", "放課後、二人は喫茶店で話した。離れても友達でいようと約束した。",
+                    "japanese", "japanese", "chinese", "B1")
+    until(lambda: not vm.busy)
+    target = item(window, "topicCategory1")
+    view = item(window, "materialScroll")
+    flick = view.property("contentItem")
+    y = target.mapToItem(flick, QPointF()).y() + flick.property("contentY")
+    flick.setProperty("contentY", max(0, min(y - 16, flick.property("contentHeight") - flick.height())))
+    QTest.qWait(60)
+    point = target.mapToScene(QPointF(target.width() / 2, target.height() / 2)).toPoint()
+    QTest.mousePress(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    QTest.qWait(20)
+    vm._poll_preparation()
+    QTest.qWait(20)
+    QTest.mouseRelease(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    QTest.qWait(30)
+    assert vm.topicFilter == vm.topicCategories[1]
+    assert len(vm.filteredTopics) < len(vm.topics)
+
+
+def test_background_preparation_does_not_move_composer_actions(desktop):
+    vm, window, scaffold, provider, speech, audio, database = desktop
+    load_and_start(vm, window)
+    vm._preparation_timer.stop()
+    vm._preparation_state = "idle"
+    vm._response_timing = ""
+    vm.uiChanged.emit()
+    QTest.qWait(50)
+    target = item(window, "recordButton")
+    before = target.mapToScene(QPointF(target.width() / 2, target.height() / 2))
+    vm._preparation_state = "ready"
+    vm._response_timing = "首字 0.25 秒 · 完整回复 0.80 秒"
+    vm.uiChanged.emit()
+    QTest.qWait(50)
+    assert target.mapToScene(QPointF(target.width() / 2, target.height() / 2)) == before
+
+
+def test_window_restore_clamps_removed_monitor_and_forwards_native_actions(qt_app, tmp_path):
+    from PySide6.QtCore import QRect
+    from lingualoop.desktop.window import DesktopWindowController
+    settings = QSettings(str(tmp_path / "window.ini"), QSettings.Format.IniFormat)
+    settings.setValue("normalGeometry", QRect(90000, 90000, 1180, 780))
+    window = QQuickWindow()
+    window.setMinimumWidth(360)
+    window.setMinimumHeight(560)
+    controller = DesktopWindowController(settings)
+    controller.attach(window)
+    assert window.screen().availableGeometry().intersects(window.geometry())
+    controller.save()
+    assert settings.value("normalGeometry") == window.geometry()
+    class NativeWindow:
+        state = Qt.WindowState.WindowNoState
+        calls = []
+        def startSystemMove(self): self.calls.append("move"); return True
+        def startSystemResize(self, edges): self.calls.append(edges); return True
+        def windowState(self): return self.state
+    native = NativeWindow()
+    controller._window = native
+    assert controller.startMove()
+    assert controller.startResize(Qt.Edge.BottomEdge.value | Qt.Edge.RightEdge.value)
+    assert native.calls == ["move", Qt.Edge.BottomEdge | Qt.Edge.RightEdge]
+    assert not controller.startResize(1024)
+    native.state = Qt.WindowState.WindowMaximized
+    assert not controller.startResize(Qt.Edge.RightEdge.value)
+    window.close()

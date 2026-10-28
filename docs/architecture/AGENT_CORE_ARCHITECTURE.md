@@ -4,6 +4,8 @@
 
 LinguaLoop 的 agent 不负责自由规划任务；它负责执行可声明、可测试、可复盘的语言学习 Pattern。
 
+当前产品主旨见 [Project Brief](../product/PROJECT_BRIEF.md)：沉浸提供语境，语音对话练输出。本文保留内核设计与既有文本原型经验；默认 Pattern 和交付优先级按话题讨论与基础语音调整，具体实现状态以代码为准。
+
 项目需要手写的是一个领域化的 `Language Learning Agent Kernel`，而不是 Codex、Claude Code 或 DeepSeek Harness 那种通用 agent harness：
 
 ```text
@@ -40,6 +42,7 @@ Pattern -> PracticePlan -> AgentFlow -> SessionEvents -> FeedbackItems / ReviewI
 
 每个 Pattern 固定一种练习方式，例如：
 
+- `topic-discussion`: 材料理解、话题选择、语音讨论与轻量复盘，作为默认入口。
 - `roleplay`: 固定角色扮演对话流程。
 - `retell`: 固定理解、复述、纠错、再复述流程。
 - `shadowing`: 固定听、跟读、识别差异、重复练习流程。
@@ -343,14 +346,15 @@ class PracticeAgentState(BaseModel):
 
 State 应包含执行所需快照；持久历史应尽量从 `SessionEvent` 重建。
 
-## First Pattern: Guided Roleplay
+## Default Pattern: Topic Discussion
 
-建议把 `roleplay` 作为第一个手写 Pattern，因为它能覆盖完整文本闭环，又不会强制引入语音或 Live2D。
+复用已有文本 runner，优先形成 `topic-discussion`：AI 理解沉浸材料、推荐话题，用户选择、修改或自提话题，再进入语音讨论。`guided-roleplay` 由用户主动选择，共享语境和证据对象；不要求用户先进入角色或完成课程。
 
 必需能力：
 
 ```text
 llm.generate >= 1.0
+voice.session >= 1.0
 ```
 
 可选能力：
@@ -365,20 +369,21 @@ avatar.render >= 1.0
 
 ```text
 material analysis
-  -> scenario setup
-  -> AI opens roleplay
+  -> grounded topics and opening questions
+  -> learner selects or proposes a topic
+  -> AI opens discussion (roleplay only if selected)
   -> learner replies
-  -> AI responds in-role
+  -> AI responds in context
   -> optional correction event
   -> end condition
   -> review draft
 ```
 
-这能形成清晰的 MVP 路径，后续也能自然升级为语音 roleplay。
+这些 capability 是目标示意，具体语音 contract 仍需根据最小实现确定。基础语音可以轮流说话；仅文本流程用于原型或回退，不代替正式语音 MVP 验收。用户选择 roleplay 时增加场景和角色设定，自然讨论不要求角色设定。
 
 ## First Plugin: LLM Provider
 
-第一个插件应是最小 LLM provider adapter，而不是 LiveKit。
+现有 LLM provider adapter 继续作为材料理解、话题生成和对话的基础；随后通过可替换 voice provider 补齐核心语音路径。
 
 ```text
 plugin: llm-openai-compatible
@@ -396,7 +401,7 @@ Provider 应支持：
 - fallback JSON repair / validation retry
 - usage and latency metrics
 
-这会先解锁文本 MVP、provider mock 和早期 Patterns。
+它支撑文本原型、provider mock 和早期 Patterns，但正式 MVP 还必须完成话题选择和基础语音路径。
 
 ## Discovery Mechanism
 

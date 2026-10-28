@@ -2,6 +2,8 @@
 
 本文档定义 LinguaLoop 中 Pattern 的产品语义和早期分类。Pattern 回答“怎么学”，Plugin 回答“能做什么”，Kernel 负责把 Pattern 编译并执行为可追踪的学习会话。
 
+当前主旨见 [Project Brief](../product/PROJECT_BRIEF.md)。默认路径是沉浸材料的话题讨论，语音是正式 MVP 的必需能力；`input-lesson` 等流程按需进入，`guided-roleplay` 由用户自愿选择。以下是目标设计，不表示各 Pattern 已实现。
+
 ## Pattern 的定义
 
 Pattern 是一套可声明、可测试、可复盘的学习流程。它不等于 prompt 模板，也不等于外部能力插件。
@@ -28,6 +30,33 @@ Pattern 是一套可声明、可测试、可复盘的学习流程。它不等于
 
 ## 初始 Pattern 家族
 
+### `topic-discussion`
+
+解决问题：用户已经通过沉浸接触过内容，但缺少共同语境下的口语伙伴，或不知道从什么话题开口。
+
+适用场景：看完动画、视频、播客或文章后，讨论人物、事件、观点、个人经历和相关选择。
+
+稳定结构：
+
+```text
+material/context understanding
+  -> grounded topic suggestions and opening questions
+  -> learner selects, edits or proposes a topic
+  -> voice discussion
+  -> optional hints and feedback
+  -> learner ends session
+  -> light closeout and review candidates
+```
+
+关键规则：
+
+- 话题和追问保留材料依据及本次内容范围，材料不足时允许用户补充或缩小讨论范围。
+- 不要求用户扮演角色，也不要求先完成词汇课、理解检查或固定 lesson。
+- 语音为正式 MVP 的主路径，文本可用于原型、补充和回退；最终能力 contract 按所选语音实现定义。
+- 纠错时机和强度可调；反馈与复习项来自用户真实输出。
+
+MVP 地位：默认讨论 Pattern，优先与现有材料分析、反馈和复习对象整合。
+
 ### `input-lesson`
 
 解决问题：把用户已经看过或读过的真实输入材料变成一轮可练习、可纠错、可复习的学习任务。
@@ -52,7 +81,7 @@ Scene / Argument Capsule
 - `live_chat` 优先互动语气、口语 chunk 和场景输出。
 - `article_reading` 优先论点理解、连接词、立场表达、summary 和 paraphrase。
 
-MVP 地位：第一批内置 Pattern 候选。
+MVP 地位：保留为按需学习方式，不是进入话题讨论前必须完成的流程。
 
 ### `guided-roleplay`
 
@@ -78,7 +107,7 @@ material/context setup
 - 纠错强度应可配置，避免打断对话流。
 - 反馈应偏向可迁移表达和 recurring pattern，而不是每轮长篇批改。
 
-MVP 地位：第一批内置 Pattern 候选，可与 `input-lesson` 共享材料分析结果。
+MVP 地位：用户主动选择的可选讨论方式，可与 `topic-discussion` / `input-lesson` 共享材料分析结果；不作为默认入口。
 
 ### `retell`
 
@@ -153,7 +182,7 @@ Cold attempt
 - 自动化依赖压缩、迁移、延迟回忆和 D+1/D+3/D+7 返回。
 - 不根据 ASR 文本断言发音问题；需要音频证据。
 
-MVP 地位：建议放入 Phase 2，不阻塞文本 MVP；但其“输出才是证据”原则应从 MVP 开始遵守。
+MVP 地位：建议放入 Phase 2，不阻塞基础语音讨论 MVP；其“输出才是证据”原则应从 MVP 开始遵守。
 
 ### `shadowing`
 
@@ -184,6 +213,13 @@ MVP 地位：Phase 2 或语音插件验证后再实现。
 ## Capability Requirements 示例
 
 ```text
+topic-discussion
+  requires:
+    - llm.generate >= 1.0
+    - voice.session >= 1.0
+  optional:
+    - material.segment >= 1.0
+
 input-lesson
   requires:
     - llm.structured >= 1.0
@@ -213,13 +249,15 @@ cora
     - telemetry.record >= 1.0
 ```
 
+以上是能力组合示意，不冻结语音传输方式。基础语音可采用轮流识别与合成；只提供文本的讨论可用于开发验证，但不满足正式 MVP 的语音要求。
+
 ## 第一版实现顺序
 
-1. 定义 `PatternManifest`、`PracticePlan`、`PracticeInstruction` 和 `CapabilityRequirement` 的最小 schema。
-2. 实现 `input-lesson` 或 `guided-roleplay` 的 direct runner，让文本闭环跑通。
-3. 实现 `summary-first-review` 的最小入口和 review outcome。
-4. 在 direct runner 稳定后，把同一流程映射到 LangGraph adapter。
-5. 将 CORA 放入后续 Pattern，但保留其测量原则：冷启动输出和延迟输出才是口语自动化证据。
+1. 复用现有文本闭环，补齐 `topic-discussion` 的话题生成、选择和最小 Pattern contract。
+2. 接入基础语音能力，完成“选话题 → 多轮说话与收听回复 → 轻量复盘”，支持自愿切换到 `guided-roleplay`。
+3. 将输出证据接到现有 review queue，完善 `summary-first-review` 的最小入口和 outcome。
+4. 按实际需要补齐 registry、capability requirement check 与 LangGraph adapter，不让完整框架阻塞核心语音路径。
+5. 将 CORA、更多练习方法与理论配置放入后续增强，保留冷启动输出和延迟输出的测量原则。
 
 ## 重新评估条件
 
